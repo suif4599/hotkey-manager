@@ -1,0 +1,58 @@
+[build-system]
+requires = [
+    "setuptools>=45.0",
+    "wheel",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hotkey_manager"
+version = "0.1.0"
+description = "Linux hotkey manager with native daemon bindings"
+readme = "README.md"
+requires-python = ">=3.2"
+license = "GPL-3.0-only"
+license-files = ["LICEN[CS]E"]
+authors = [
+	{ name = "suif4599", email = "suif4599@gamil.com" }
+]
+keywords = ["hotkey", "daemon", "ipc", "linux"]
+classifiers = [
+	"Development Status :: 3 - Alpha",
+	"Intended Audience :: Developers",
+	"Operating System :: POSIX :: Linux",
+	"Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.2",
+    "Programming Language :: Python :: 3.3",
+    "Programming Language :: Python :: 3.4",
+    "Programming Language :: Python :: 3.5",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/suif4599/hotkey-manager"
+Repository = "https://github.com/suif4599/hotkey-manager"
+Issues = "https://github.com/suif4599/hotkey-manager/issues"
+
+[tool.setuptools]
+zip-safe = false
+
+[tool.setuptools.package-data]
+"hotkey_manager" = ["*.so", "*.pyi"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["hotkey_manager*"]
+
+[tool.distutils.bdist_wheel]
+python-tag = "py3"
+plat-name = "@PYTHON_PLATFORM_TAG@"

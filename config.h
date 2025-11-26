@@ -1,0 +1,10 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
+#define BACK_LOG 100
+#define MAX_CONNECTIONS_FOR_ONE_PROCESS 5
+#define RECEIVER_CHECK_RESPONSE_INTERVAL_MS 10
+#define KEEP_ALIVE_TIME (5 * 60 * 1000)
+#define CONFIG_FILE_PATH "/usr/local/etc/hotkey-manager-config.json"
+
+#endif // CONFIG_H

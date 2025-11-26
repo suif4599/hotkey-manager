@@ -1,0 +1,19 @@
+[Unit]
+Description=Hotkey Manager Daemon
+Documentation=https://github.com/suif4599/hotkey-manager
+After=multi-user.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=@CMAKE_INSTALL_PREFIX@/bin/hotkey-manager-daemon
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hotkey-manager
+
+[Install]
+WantedBy=multi-user.target
