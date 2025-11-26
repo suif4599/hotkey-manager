@@ -70,14 +70,6 @@ The install target places the daemon in `/usr/local/bin`, installs headers and t
 - `socketPath`: Unix domain socket exposed to clients
 - `passwordHash`: Argon2 hash used for client authentication
 
-Generate a new password hash:
-
-```bash
-hotkey-manager-daemon hash "your-password"
-```
-
-Update the JSON and keep file permissions restricted (0600 is enforced by the daemon).
-
 ## Run the Daemon
 
 ```bash
@@ -86,6 +78,16 @@ sudo systemctl enable --now hotkey-manager-daemon.service
 ```
 
 The daemon must run as root to read keyboard events. Logs will be written to syslog.
+
+Usage:
+| Command | Description |
+| :---: | :---: |
+| hotkey-manager-daemon | Start the daemon (Require ROOT) |
+| hotkey-manager-daemon hash <password> | Generate password hash for given password |
+| hotkey-manager-daemon keynames | List all available key names |
+| hotkey-manager-daemon set <field> <value> | Modify the config file (Require ROOT) |
+
+For example, use `sudo hotkey-manager-daemon set passwordHash $(hotkey-manager-daemon hash <password>)` to change password
 
 ## Client Libraries
 
@@ -145,12 +147,12 @@ pip uninstall hotkey-manager
 ### Syntax
 
 ```
-Shortcut    := Combination | ModifierCall
-Combination := Key { "+" Key }
+Shortcut     := Combination | ModifierCall
+Combination  := Key { "+" Key }
 ModifierCall := Modifier "(" Shortcut [", " DurationMs] ")"
-Modifier    := "None" | "Double" | "Hold"
-DurationMs  := <integer literal in milliseconds>
-Key         := name from `hotkey-manager-daemon keynames`
+Modifier     := "None" | "Double" | "Hold"
+DurationMs   := <integer literal in milliseconds>
+Key          := name from `hotkey-manager-daemon keynames`
 ```
 
 - Whitespace is ignored, so `CTRL+A`, `CTRL + A`, and `CTRL +  A` are equivalent.

@@ -1,6 +1,7 @@
 #include "ipc/encrypt.h"
 
 #include <stdexcept>
+#include <cstring>
 
 using namespace hotkey_manager;
 
@@ -63,6 +64,7 @@ std::string Encryptor::hashPassword(const std::string& password) {
             crypto_pwhash_MEMLIMIT_INTERACTIVE
         ) != 0)
         throw std::runtime_error("Password hashing failed");
+    hash.resize(std::strlen(hash.c_str()));
     return hash;
 }
 

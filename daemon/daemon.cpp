@@ -51,12 +51,35 @@ int main(int argc, char* argv[]) {
             }
             return 0;
         }
+        if (command == "set" && argc == 4) {
+            if (getuid() != 0) {
+                std::cerr << "Error: Modifying the config file requires root privileges." << std::endl;
+                return 1;
+            }
+            std::string field = argv[2];
+            std::string value = argv[3];
+            auto& config = HotkeyManagerConfig::getInstance(CONFIG_FILE_PATH);
+            try {
+                config[field] = value;
+            } catch (const std::exception& e) {
+                std::cerr << "Error: " << e.what() << std::endl;
+                return 1;
+            }
+            try {
+                config.save();
+            } catch (const std::exception& e) {
+                std::cerr << "Error saving config: " << e.what() << std::endl;
+                return 1;
+            }
+            return 0;
+        }
         if (command == "-h" || command == "--help") {
             std::cout << "hotkey-manager-daemon: Daemon for hotkey-manager\n"
                       << "Usage:\n"
-                      << "    hotkey-manager-daemon                    Start the daemon\n"
-                      << "    hotkey-manager-daemon hash <password>    Generate password hash for given password\n\n"
-                      << "    hotkey-manager-daemon keynames           List all available key names\n\n"
+                      << "    hotkey-manager-daemon                       Start the daemon (Require ROOT)\n"
+                      << "    hotkey-manager-daemon hash <password>       Generate password hash for given password\n"
+                      << "    hotkey-manager-daemon keynames              List all available key names\n"
+                      << "    hotkey-manager-daemon set <field> <value>   Modify the config file (Require ROOT)\n\n"
                       << "Config file is located at `" << CONFIG_FILE_PATH << "`\n"
                       << "Example config file content:\n"
                       << "{\n"
@@ -65,7 +88,7 @@ int main(int argc, char* argv[]) {
                       << "    \"passwordHash\": \"$argon2id$v=19$m=65536,t=2,p=1$gVhSWbbAsC+mm2QfArc/xw$5fdVpc61mjx0xkbrMVi9YCXhIcl29h3fHvZkYO4TsIU\"\n"
                       << "}\n";
         }
-        std::cerr << "Usage: hotkey-manager-daemon [hash <password>]" << std::endl;
+        std::cerr << "Use `hotkey-manager-daemon -h` for help" << std::endl;
         return 1;
     }
 

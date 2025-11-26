@@ -33,6 +33,24 @@ namespace hotkey_manager {
 // (Encrypted) "[OK]"
 // (Encrypted) "[Error]: ..."
 
+class HotkeyManagerConfig {
+    std::string configFile;
+    std::string deviceFile;
+    std::string socketPath;
+    std::string passwordHash;
+    static bool isAsciiPath(const std::string& path);
+    static bool isPlainText(const std::string& content);
+    void setSecurePermissions() const;
+    void parseConfig(const std::string& content);
+    void createDefaultConfig();
+    HotkeyManagerConfig(const std::string& filePath);
+public:
+    static HotkeyManagerConfig& getInstance(const std::string& configFile = "");
+    std::string& operator[](const std::string& key);
+    const std::string& operator[](const std::string& key) const;
+    void save() const;
+};
+
 class HotkeyManager {
     Keyboard& keyboard;
     std::map<int, Session*> sessionMap; // Maintain life cycle of Session*
