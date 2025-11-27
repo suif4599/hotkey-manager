@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <string>
 #include <functional>
+#include <mutex>
 
 namespace hotkey_manager {
 
@@ -21,6 +22,7 @@ class HotkeyInterface {
     UnixDomainSocketClient client;
     Encryptor encryptor;
     std::string serverPublicKey;
+    mutable std::recursive_mutex interfaceMutex;
 public:
     HotkeyInterface(const std::string& socketPath, int64_t timeoutMs = 5000);
     ~HotkeyInterface();

@@ -14,6 +14,7 @@ HotkeyInterface::HotkeyInterface(const std::string& socketPath, int64_t timeoutM
 : callbackMap()
 , client(socketPath, timeoutMs)
 , encryptor() {
+    std::lock_guard<std::recursive_mutex> lock(interfaceMutex);
     std::string* resp = client.sendCommand("getPublicKey");
     if (!resp)
         throw std::runtime_error("Failed to receive response for command getPublicKey");
@@ -34,14 +35,13 @@ HotkeyInterface::HotkeyInterface(const std::string& socketPath, int64_t timeoutM
     }
     std::string decryptedResp = encryptor.decrypt(*response);
     delete response;
-    if (decryptedResp != "[OK]") {
-        delete response;
-        throw std::runtime_error("Failed to register public key: " + *response);
-    }
+    if (decryptedResp != "[OK]")
+        throw std::runtime_error("Failed to register public key: " + decryptedResp);
     // If reached here, there won't be [ENCRYPTION ERROR] anymore
 }
 
 HotkeyInterface::~HotkeyInterface() {
+    std::lock_guard<std::recursive_mutex> lock(interfaceMutex);
     std::string* response = client.sendCommand(
         encryptor.encrypt("CloseSession()", serverPublicKey)
     );
@@ -60,11 +60,15 @@ std::string HotkeyInterface::registerHotkey(
     std::function<void()> callback,
     std::string functionId
 ) {
+    std::lock_guard<std::recursive_mutex> lock(interfaceMutex);
     // Don't allow duplicate non-empty functionId
     if (!functionId.empty()) {
-        for (const auto& [fid, cb] : callbackMap[hotkeyStr]) {
-            if (fid == functionId)
-                throw std::runtime_error("Duplicate functionId '" + functionId);
+        auto it = callbackMap.find(hotkeyStr);
+        if (it != callbackMap.end()) {
+            for (const auto& [fid, cb] : it->second) {
+                if (fid == functionId)
+                throw std::runtime_error("Duplicate functionId '" + functionId + "'");
+            }
         }
     }
     static const std::regex hotkeyRe {"^\\[OK\\]: *(.+)$"};
@@ -89,6 +93,7 @@ std::string HotkeyInterface::registerHotkey(
 }
 
 void HotkeyInterface::deleteHotkey(const std::string& hotkeyStr) {
+    std::lock_guard<std::recursive_mutex> lock(interfaceMutex);
     std::string formatedHotkeyStr = formatHotkey(hotkeyStr);
     auto it = callbackMap.find(formatedHotkeyStr);
     if (it == callbackMap.end())
@@ -102,10 +107,11 @@ void HotkeyInterface::deleteHotkey(const std::string& hotkeyStr) {
     delete response;
     if (decryptedResp != "[OK]")
         throw std::runtime_error("Failed to delete hotkey: " + decryptedResp);
-    callbackMap.erase(hotkeyStr);
+    callbackMap.erase(formatedHotkeyStr);
 }
 
 void HotkeyInterface::deleteCallback(std::string functionId) {
+    std::lock_guard<std::recursive_mutex> lock(interfaceMutex);
     if (functionId.empty())
         throw std::runtime_error("FunctionId cannot be empty to specify a callback");
     for (auto it = callbackMap.begin(); it != callbackMap.end(); ++it) {
@@ -126,6 +132,7 @@ void HotkeyInterface::deleteCallback(std::string functionId) {
 }
 
 void HotkeyInterface::authenticate(const std::string& password) {
+    std::lock_guard<std::recursive_mutex> lock(interfaceMutex);
     pid_t pid = getpid();
     uid_t uid = getuid();
     gid_t gid = getgid();
@@ -142,6 +149,7 @@ void HotkeyInterface::authenticate(const std::string& password) {
 }
 
 std::string HotkeyInterface::formatHotkey(const std::string& hotkeyStr) {
+    std::lock_guard<std::recursive_mutex> lock(interfaceMutex);
     static const std::regex keyRe {"^\\[OK\\]: *(.+)$"};
     std::string command = "FormatHotkey(" + hotkeyStr + ")";
     std::string encryptedCmd = encryptor.encrypt(command, serverPublicKey);
@@ -165,56 +173,66 @@ void HotkeyInterface::mainloop(std::function<bool()> keepRunning) {
     while (true) {
         // Handle all pending responses
         bool handledResponse = false;
-        while (true) {
-            std::string* response = client.receiveResponse();
-            if (!response)
-                break;
-            handledResponse = true;
-            if (response->rfind("[ENCRYPTION ERROR]:", 0) == 0) {
-                std::cerr << "[HotkeyInterface::mainloop] Error: " << *response << std::endl;
+        try {
+            std::lock_guard<std::recursive_mutex> lock(interfaceMutex);
+            while (true) {
+                std::string* response = client.receiveResponse();
+                if (!response)
+                    break;
+                handledResponse = true;
+                if (response->rfind("[ENCRYPTION ERROR]:", 0) == 0) {
+                    std::cerr << "[HotkeyInterface::mainloop] Error: " << *response << std::endl;
+                    delete response;
+                    continue;
+                }
+                if (response->rfind("[Error]:", 0) == 0) {
+                    std::cerr << "[HotkeyInterface::mainloop] Server returned error: " << *response << std::endl;
+                    delete response;
+                    continue;
+                }
+                std::string decryptedResp = encryptor.decrypt(*response);
                 delete response;
-                continue;
-            }
-            if (response->rfind("[Error]:", 0) == 0) {
-                std::cerr << "[HotkeyInterface::mainloop] Server returned error: " << *response << std::endl;
-                delete response;
-                continue;
-            }
-            std::string decryptedResp = encryptor.decrypt(*response);
-            delete response;
-            std::smatch match;
-            if (std::regex_match(decryptedResp, match, hotkeyRe)) {
-                std::string hotkeyStr = match[1];
-                auto it = callbackMap.find(hotkeyStr);
-                if (it != callbackMap.end()) {
-                    for (auto& [fid, callback] : it->second) {
-                        callback();
+                std::smatch match;
+                if (std::regex_match(decryptedResp, match, hotkeyRe)) {
+                    std::string hotkeyStr = match[1];
+                    auto it = callbackMap.find(hotkeyStr);
+                    if (it != callbackMap.end()) {
+                        for (auto& [fid, callback] : it->second) {
+                            callback();
+                        }
+                    } else {
+                        std::cerr << "[HotkeyInterface::mainloop] Warning: No callback registered for hotkey " << hotkeyStr << std::endl;
                     }
                 } else {
-                    std::cerr << "[HotkeyInterface::mainloop] Warning: No callback registered for hotkey " << hotkeyStr << std::endl;
+                    std::cerr << "[HotkeyInterface::mainloop] Warning: Unknown response from server: " << decryptedResp << std::endl;
                 }
-            } else {
-                std::cerr << "[HotkeyInterface::mainloop] Warning: Unknown response from server: " << decryptedResp << std::endl;
             }
+        } catch (const std::exception& e) {
+            std::cerr << "[HotkeyInterface::mainloop] Exception: " << e.what() << std::endl;
         }
 
         // Send KeepAlive
         int64_t currentTime = getTimestampMs();
-        if (currentTime - lastKeepAliveTime >= KEEP_ALIVE_TIME / 2) {
-            std::string command = "KeepAlive()";
-            std::string encryptedCmd = encryptor.encrypt(command, serverPublicKey);
-            std::string* response = client.sendCommand(encryptedCmd);
-            if (!response) {
-                std::cerr << "[HotkeyInterface::mainloop] Error: No response for KeepAlive" << std::endl;
-                continue;
+        try {
+            std::lock_guard<std::recursive_mutex> lock(interfaceMutex);
+            if (currentTime - lastKeepAliveTime >= KEEP_ALIVE_TIME / 2) {
+                std::string command = "KeepAlive()";
+                std::string encryptedCmd = encryptor.encrypt(command, serverPublicKey);
+                std::string* response = client.sendCommand(encryptedCmd);
+                if (!response) {
+                    std::cerr << "[HotkeyInterface::mainloop] Error: No response for KeepAlive" << std::endl;
+                    continue;
+                }
+                std::string decryptedResp = encryptor.decrypt(*response);
+                delete response;
+                if (decryptedResp != "[OK]") {
+                    std::cerr << "[HotkeyInterface::mainloop] Error: KeepAlive failed: " << decryptedResp << std::endl;
+                    continue;
+                }
+                lastKeepAliveTime = currentTime;
             }
-            std::string decryptedResp = encryptor.decrypt(*response);
-            delete response;
-            if (decryptedResp != "[OK]") {
-                std::cerr << "[HotkeyInterface::mainloop] Error: KeepAlive failed: " << decryptedResp << std::endl;
-                continue;
-            }
-            lastKeepAliveTime = currentTime;
+        } catch (const std::exception& e) {
+            std::cerr << "[HotkeyInterface::mainloop] Exception during KeepAlive: " << e.what() << std::endl;
         }
 
         // Check whether to exit

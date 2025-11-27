@@ -1,6 +1,6 @@
 "Hotkey Manager Module"
 
-from collections.abc import Callable
+from typing import Callable, Optional
 
 class HotkeyManagerInterface:
     "Hotkey Manager Interface"
@@ -23,5 +23,5 @@ class HotkeyManagerInterface:
     def delete_callback(self, callback: Callable[[], None]) -> None:
         "Delete the given callback function."
 
-    def mainloop(self) -> None:
+    def mainloop(self, keep_running: Optional[Callable[[], bool]] = None) -> None:
         "Start the main event loop to listen for hotkey events."

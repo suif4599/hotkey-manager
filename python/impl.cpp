@@ -390,18 +390,58 @@ extern "C" PyObject* delete_callback(HotkeyManagerInterfaceObject* self, PyObjec
 }
 
 extern "C" PyObject* mainloop(HotkeyManagerInterfaceObject* self, PyObject* args, PyObject* kwargs) {
-    // No arguments
-    static char* kwlist[] = {nullptr};
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "", kwlist))
+    // No argumentssystemd-ask-password
+    PyObject* keepRunningObj = nullptr;
+    bool isNone;
+    static char kw_keep_running[] = "keep_running";
+    static char* kwlist[] = {kw_keep_running, nullptr};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|O", kwlist, &keepRunningObj))
         return nullptr;
+    if (keepRunningObj == nullptr || Py_IsNone(keepRunningObj)) {
+        isNone = true;
+    } else {
+        isNone = false;
+        if (!PyCallable_Check(keepRunningObj)) {
+            PyErr_SetString(PyExc_TypeError, "keep_running must be callable or None");
+            return nullptr;
+        }
+        Py_INCREF(keepRunningObj);
+    }
 
     std::string errorMessage;
     bool failed = false;
     PyThreadState* threadState = PyEval_SaveThread();
     try {
-        self->hotkeyInterface->mainloop([]() {
+        self->hotkeyInterface->mainloop([keepRunningObj, isNone]() {
             PyGILState_STATE gstate = PyGILState_Ensure();
-            const bool keepRunning = PyErr_CheckSignals() == 0; // KeyboardInterrupt and other exception will exit the loop
+            bool keepRunning = PyErr_CheckSignals() == 0; // KeyboardInterrupt and other exception will exit the loop
+            if (!isNone) {
+                PyObject* result = PyObject_CallObject(keepRunningObj, nullptr);
+                if (result == nullptr) {
+                    if (PyErr_ExceptionMatches(PyExc_KeyboardInterrupt)) {
+                        // Same as register_hotkey
+                        PyErr_Clear();
+                        PyErr_SetInterrupt();
+                    } else {
+                        PyErr_Print();
+                    }
+                    keepRunning = false;
+                } else {
+                    int isTrue = PyObject_IsTrue(result);
+                    Py_DECREF(result);
+                    if (isTrue == -1) {
+                        if (PyErr_ExceptionMatches(PyExc_KeyboardInterrupt)) {
+                            PyErr_Clear();
+                            PyErr_SetInterrupt();
+                        } else {
+                            PyErr_Print();
+                        }
+                        keepRunning = false;
+                    } else {
+                        keepRunning = keepRunning && (isTrue != 0);
+                    }
+                }
+            }
             PyGILState_Release(gstate);
             return keepRunning;
         });
