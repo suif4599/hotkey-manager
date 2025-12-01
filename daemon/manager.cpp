@@ -331,8 +331,8 @@ HotkeyManager::~HotkeyManager() {
 
 void HotkeyManager::mainloop() {
     syslog(LOG_INFO, "HotkeyManager mainloop started.");
-    bool updated = false;
     while (true) {
+        bool updated = false;
         // Delete sessions in waitlist
         for (int clientFd : deleteWaitlist) {
             server.deleteClient(clientFd);
@@ -384,8 +384,11 @@ void HotkeyManager::mainloop() {
 
         // Handle new keyboard events
         Event* ev = device.next();
-        if (!ev)
+        if (!ev) {
+            if (!updated)
+                usleep(1000);
             continue;
+        }
         keyboard.update(*ev);
         for (auto& [cond, sessions] : hotkeyMap) {
             if (!keyboard.check(*cond))
