@@ -1,0 +1,179 @@
+.TH HOTKEY-MANAGER-DAEMON 1 "January 2025" "hotkey-manager 1.0" "User Commands"
+
+.SH NAME
+hotkey-manager-daemon \- privileged daemon for system-wide hotkey handling
+
+.SH SYNOPSIS
+.B hotkey-manager-daemon
+.br
+.B hotkey-manager-daemon
+.B hash
+.I password
+.br
+.B hotkey-manager-daemon
+.B keynames
+.br
+.B hotkey-manager-daemon
+.B set
+.I field
+.I value
+.br
+.B hotkey-manager-daemon
+.B --help
+
+.SH DESCRIPTION
+.B hotkey-manager-daemon
+captures keyboard events at the Linux evdev layer and distributes hotkey
+notifications to authenticated clients over an encrypted Unix domain socket.
+It is typically installed as a systemd service and must run with root
+privileges in order to read from
+.I /dev/input/event*
+files.
+
+When started without subcommands the daemon loads its configuration, opens the
+configured input device, and listens on the configured socket path.  Clients
+connect through the companion C++ or Python libraries, exchanging messages over
+a libsodium\-backed authenticated channel.  The daemon enforces per\-process
+connection limits, validates keep-alive heartbeats, and broadcasts hotkey hits
+only to sessions that registered the corresponding condition.
+
+.SH SUBCOMMANDS
+The executable also provides several maintenance utilities:
+.TP
+.B hash
+.I password
+Returns an Argon2id hash suitable for the
+.B passwordHash
+field in the configuration file.  Use this to provision or rotate client
+passwords without exposing plaintext in the config.
+.TP
+.B keynames
+Lists every key symbol recognized on the active keyboard device.  When stdout
+is a TTY the names are column\-wrapped to the terminal width; otherwise one name
+appears per line.
+.TP
+.B set
+.I field
+.I value
+Updates the configuration file in place.  This subcommand requires root
+privileges.  Supported fields are
+.BR deviceFile ,
+.BR socketPath ,
+and
+.BR passwordHash .
+The daemon is not automatically restarted; reload manually via systemd after
+editing.
+.TP
+.B --help
+Displays a usage summary and a sample configuration block.
+
+.SH OPTIONS
+The daemon accepts no global options beyond the subcommands above.  Systemd
+unit files may provide environment variables to adjust behaviour; see
+.BR systemd.exec (5)
+for details.
+
+.SH CONFIGURATION
+The default configuration resides at
+.I @HOTKEY_MANAGER_CONFIG_PATH@
+(macro
+.B CONFIG_FILE_PATH
+at build time).  If the file is missing, the daemon creates one with safe
+permissions (0600) containing:
+.PP
+.RS
+.nf
+{
+    "deviceFile": "auto",
+    "socketPath": "/tmp/hotkey-manager.sock",
+    "passwordHash": "$argon2id$..."
+}
+.fi
+.RE
+.PP
+Fields are interpreted as follows:
+.IP \(bu 2
+.B deviceFile
+specifies the event device to monitor.  The special value
+.B auto
+performs simple auto\-detection; an error is raised if zero or multiple
+candidates match.
+.IP \(bu 2
+.B socketPath
+is the Unix domain socket exposed to clients.  The daemon unlinks any existing
+socket, binds, and chmods the new path to 0666.
+.IP \(bu 2
+.B passwordHash
+stores the Argon2id hash clients must satisfy during authentication.
+
+Configuration files must be regular ASCII text files; symlinks and non\-text
+content are rejected.  After any modification restart the daemon to pick up
+changes.
+
+.SH RUNTIME BEHAVIOUR
+During normal operation the daemon:
+.IP \(bu 2
+Accepts client connections and validates Linux peer credentials via
+.BR SO_PEERCRED .
+.IP \(bu 2
+Performs a libsodium key exchange, then expects encrypted commands such as
+.BR RegisterHotkey ,
+.BR KeepAlive ,
+and
+.BR CloseSession .
+.IP \(bu 2
+Tracks active sessions, enforcing
+.B MAX_CONNECTIONS_FOR_ONE_PROCESS
+concurrent connections per PID.
+.IP \(bu 2
+Dispatches keyboard events through its internal state machine, triggering
+callbacks when registered hotkey conditions are satisfied.
+.IP \(bu 2
+Sends keepalive errors and terminates sessions that fail to ping within
+.B KEEP_ALIVE_TIME
+milliseconds.
+Logging is written to syslog under the facility
+.BR LOG_DAEMON .
+
+.SH EXIT STATUS
+.TP
+.B 0
+Success, or a subcommand completed normally.
+.TP
+.B 1
+An error occurred (invalid arguments, failed configuration update, permission
+denied, runtime exception).
+
+.SH EXAMPLES
+.IP 1. 4
+Provision a new password hash:
+.EX
+hotkey-manager-daemon hash supersecret
+.EE
+.IP 2. 4
+Enumerate available key symbols:
+.EX
+hotkey-manager-daemon keynames | less
+.EE
+.IP 3. 4
+Change the socket path then restart the service:
+.EX
+sudo hotkey-manager-daemon set socketPath /run/hotkey-manager.sock
+sudo systemctl restart hotkey-manager-daemon.service
+.EE
+
+.SH FILES
+.TP
+.B @HOTKEY_MANAGER_CONFIG_PATH@
+Configuration file read at startup and modified by the
+.B set
+subcommand.
+.TP
+.B @CMAKE_INSTALL_FULL_BINDIR@/hotkey-manager-daemon
+Installed daemon binary.
+.TP
+.B @SYSTEMD_UNIT_INSTALL_DIR@/hotkey-manager-daemon.service
+Systemd unit generated during installation (path may vary with prefix).
+
+.SH SEE ALSO
+.BR hotkey_manager (3),

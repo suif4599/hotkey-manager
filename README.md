@@ -14,12 +14,13 @@
 - Linux with `systemd` and access to `/dev/input/event*`
 - Build tooling: `cmake` >= 3.15, a C++17 compiler, `make`, `pkg-config`
 - Libraries: `libevdev-dev`, `libsodium-dev`
+- Utilities: `gzip`
 - Optional (Python bindings): `python` >= 3.2, `pip`, `virtualenv`
 
 Debian/Ubuntu example:
 
 ```bash
-sudo apt install build-essential cmake pkg-config libevdev-dev libsodium-dev python3 python3-dev python3-venv
+sudo apt install build-essential cmake pkg-config libevdev-dev libsodium-dev python3 python3-dev python3-venv gzip
 ```
 
 ## Build

@@ -208,6 +208,9 @@ void HotkeyInterface::mainloop(std::function<bool()> keepRunning) {
                 }
             }
         } catch (const std::exception& e) {
+            std::string errMsg = e.what();
+            if (errMsg == "Connection closed by server")
+                throw; // Fatal error, rethrow
             std::cerr << "[HotkeyInterface::mainloop] Exception: " << e.what() << std::endl;
         }
 

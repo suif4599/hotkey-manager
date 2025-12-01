@@ -1,0 +1,204 @@
+.TH HOTKEY_MANAGER 3 "January 2025" "hotkey_manager 1.0" "Library Functions Manual"
+
+.SH NAME
+hotkey_manager \- client library for talking to the hotkey-manager daemon
+
+.SH SYNOPSIS
+.nf
+#include "hotkey_manager/interface.h"
+
+using hotkey_manager::HotkeyInterface;
+.fi
+
+.PP
+Link with
+.B -lhotkey-manager-client
+and ensure
+.B -lsodium
+is available at run time.
+
+.SH DESCRIPTION
+The hotkey\-manager client library ships a single C++ entry point,
+.BR hotkey_manager::HotkeyInterface ,
+which encapsulates the encrypted IPC protocol used by the
+.BR hotkey-manager-daemon (8).
+Applications embed the library to register system\-wide shortcuts, receive
+callbacks when the daemon detects those shortcuts, and manage authentication
+against the daemon without handling sockets or cryptographic primitives
+directly.
+
+.PP
+The library performs the following responsibilities:
+.IP \(bu 2
+Establishes a Unix domain socket connection and validates that the peer is
+owned by root.
+.IP \(bu 2
+Negotiates public keys using libsodium and encrypts all subsequent messages
+with
+.BR crypto_box_seal (3).
+.IP \(bu 2
+Authenticates the client with the daemon using an Argon2 password hash.
+.IP \(bu 2
+Maintains the mapping between formatted hotkey expressions and user callbacks,
+delivering events as they arrive from the daemon.
+.IP \(bu 2
+Keeps the session alive automatically by issuing periodic
+.SM KeepAlive
+commands.
+
+.SH REQUIREMENTS
+.TP
+.B Headers
+`hotkey_manager/interface.h` plus the transitive headers installed alongside
+the daemon (`ipc/*.h`, `config.h`).
+.TP
+.B Libraries
+`libhotkey-manager-client.so`, libsodium, libevdev, and pthread (via the
+standard library) must be present at link and run time.
+.TP
+.B Permissions
+Client processes require read/write access to the daemon socket defined in the
+configuration file.  The daemon limits each PID to
+.B MAX_CONNECTIONS_FOR_ONE_PROCESS
+concurrent sessions (default 5).
+
+.SH WORKFLOW
+Typical client usage follows a fixed sequence:
+.IP 1. 3
+Construct
+.B HotkeyInterface
+with the socket path exported by the daemon installation.
+.IP 2. 3
+Call
+.BR authenticate ()
+with the cleartext password corresponding to the Argon2 hash stored in the
+daemon configuration.
+.IP 3. 3
+Register one or more hotkeys via
+.BR registerHotkey () ,
+capturing callbacks to execute when the daemon notifies the client.
+.IP 4. 3
+Run
+.BR mainloop ()
+to deliver events.  Provide a custom
+.I keepRunning
+callable when integrating with an external event loop.
+.IP 5. 3
+On shutdown remove callbacks with
+.BR deleteHotkey ()
+or allow the destructor to send
+.SM CloseSession
+for cleanup.
+
+.SH INTERFACE
+The library exposes exactly one public class.
+
+.SS hotkey_manager::HotkeyInterface
+.TP
+.BI "HotkeyInterface(const std::string& " socketPath ", int64_t " timeoutMs " = 5000)"
+Creates a session, retrieves the daemon public key, registers the client public
+key, and sets the per\-request timeout used when waiting for responses.  Throws
+.B std::runtime_error
+when the handshake fails or the socket is unreachable.
+.TP
+.BI "void authenticate(const std::string& " password ")"
+Authenticates the session by sending an encrypted
+.SM Authenticate
+command containing the supplied password and the calling process credentials
+.RI ( pid:uid:gid ).
+.TP
+.BI "std::string registerHotkey(const std::string& " hotkeyStr ", std::function<void()> " callback ", std::string " functionId " = std::string())"
+Registers a hotkey expression.  The daemon returns the canonical string, which
+is also used as the key inside the internal callback table.  Duplicate
+.I functionId
+entries for the same hotkey raise
+.B std::runtime_error .
+.TP
+.BI "void deleteHotkey(const std::string& " hotkeyStr ")"
+Removes all callbacks associated with a formatted hotkey and instructs the
+daemon to drop the condition for this session.
+.TP
+.BI "void deleteCallback(std::string " functionId ")"
+Removes a single callback identified by
+.IR functionId .
+When the last callback for a hotkey disappears the daemon mapping is cleared.
+.TP
+.BI "std::string formatHotkey(const std::string& " hotkeyStr ")"
+Requests canonical formatting from the daemon without registering the hotkey.
+Useful for validating user input or persisting normalized strings.
+.TP
+.BI "void mainloop(std::function<bool()> " keepRunning " = []{ return true; })"
+Runs the event loop, delivering callbacks and issuing
+.SM KeepAlive
+commands every
+.SM KEEP_ALIVE_TIME
+/ 2 milliseconds.  The loop exits when
+.I keepRunning
+returns false or an exception occurs.
+.TP
+.BI "const CallbackMap& getCallbacks() const"
+Returns a const reference to the internal callback registry for inspection.
+
+.PP
+All member functions are thread\-safe through an internal recursive mutex.  The
+class may be destroyed from any thread; destruction attempts to close the
+session gracefully.
+
+.SH ERROR HANDLING
+The library reports failures via C++ exceptions.  Common messages include:
+.TP
+.B "Failed to connect to server socket"
+Socket path is incorrect or the daemon is not running.
+.TP
+.B "Server socket is tampered (not owned by root)"
+Peer credential check failed; the client aborts to avoid talking to an
+untrusted process.
+.TP
+.B "Failed to register hotkey: ..."
+The daemon rejected the expression (syntax error, unknown key name, or missing
+authentication).
+.TP
+.B "Duplicate functionId '...'"
+The caller provided a non\-unique identifier when registering callbacks.
+
+.SH BUILDING
+When using CMake, link against the imported target installed by the project:
+.EX
+find_package(hotkey-manager CONFIG REQUIRED)
+add_executable(app main.cpp)
+target_link_libraries(app PRIVATE hotkey-manager::client)
+.EE
+If linking manually with a compiler:
+.EX
+g++ main.cpp -I@CMAKE_INSTALL_FULL_INCLUDEDIR@ -L@CMAKE_INSTALL_FULL_LIBDIR@ \
+    -lhotkey-manager-client -lsodium -levdev -o app
+.EE
+
+.SH EXAMPLE
+.EX
+#include "hotkey_manager/interface.h"
+
+using hotkey_manager::HotkeyInterface;
+
+int main() {
+    HotkeyInterface iface{"/tmp/hotkey-manager.sock"};
+    iface.authenticate("secret-password");
+
+    iface.registerHotkey("Double(ESC)", [] {
+        std::puts("ESC pressed twice");
+    });
+
+    iface.mainloop();
+}
+.EE
+
+.SH FILES
+.TP
+.B @CMAKE_INSTALL_FULL_INCLUDEDIR@/hotkey_manager
+Installed headers for the client library.
+.TP
+.B @CMAKE_INSTALL_FULL_LIBDIR@/libhotkey-manager-client.so
+Shared object providing the implementation.
+
+.SH SEE ALSO
+.BR hotkey-manager-daemon (1),

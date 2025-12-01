@@ -251,11 +251,25 @@ extern "C" PyObject* register_hotkey(HotkeyManagerInterfaceObject* self, PyObjec
         return nullptr;
     }
 
+    // Prepare Python return value before mutating state
+    PyObject* canonicalStrObj = PyUnicode_FromString(formatedHotketStr.c_str());
+    if (canonicalStrObj == nullptr) {
+        // Roll back the registration to keep client/server state aligned
+        try {
+            self->hotkeyInterface->deleteCallback(functionId);
+        } catch (...) {
+            // Suppress secondary errors; original Unicode failure takes precedence
+        }
+        self->callbackCount--;
+        Py_DECREF(callbackObj);
+        return nullptr;
+    }
+
     // Store the callback for later XDECREF
     auto& callbacks = (*self->registeredCallbacks)[formatedHotketStr];
     callbacks.push_back(callbackObj);
 
-    Py_RETURN_NONE;
+    return canonicalStrObj;
 }
 
 extern "C" PyObject* delete_hotkey(HotkeyManagerInterfaceObject* self, PyObject* args, PyObject* kwargs) {
@@ -461,24 +475,130 @@ extern "C" PyObject* mainloop(HotkeyManagerInterfaceObject* self, PyObject* args
 }
 
 const char* HotkeyManagerModule_docstring = \
-    "Linux hotkey manager with native daemon bindings";
+    "hotkey_manager module\n"\
+    "\n"\
+    "Comprehensive Python bindings for the hotkey-manager daemon. The module\n"\
+    "exposes a single entry point, HotkeyManagerInterface, which handles\n"\
+    "encrypted IPC, authentication, and hotkey dispatch for system-wide\n"\
+    "shortcuts.";
 const char* HotkeyManagerInterface_docstring = \
-    "Hotkey Manager Interface";
+    "HotkeyManagerInterface(socket_path: str, timeout_ms: int = 5000)\n"\
+    "--\n"\
+    "\n"\
+    "High-level client for interacting with the hotkey-manager daemon.\n"\
+    "It manages socket connections, libsodium key exchange, password\n"\
+    "authentication, callback registration, and keep-alive heartbeats so Python\n"\
+    "applications can react to global shortcuts without dealing with raw IPC.";
 const char* HotkeyManagerInterface_socketPath_docstring = \
-    "Path to the Unix domain socket";
+    "socket_path: str\n"\
+    "    Read-only path to the Unix domain socket exposed by the daemon.\n"\
+    "    Must match the socketPath value in the daemon configuration.";
 const char* HotkeyManagerInterface_timeoutMs_docstring = \
-    "Timeout in milliseconds for IPC operations";
+    "timeout_ms: int\n"\
+    "    Read-only per-request timeout (milliseconds). Applied whenever the\n"\
+    "    client waits for a response from the daemon.";
 const char* HotKeyManagerInterface_init_docstring = \
-    "Initialize the HotkeyManagerInterface with socket_path and timeout_ms.";
+    "__init__($self, /, socket_path, timeout_ms=5000)\n"\
+    "--\n"\
+    "\n"\
+    "Establish a new client session bound to the given Unix domain socket.\n"\
+    "The constructor connects to the daemon, retrieves its public key,\n"\
+    "registers a fresh client key pair, and prepares encrypted messaging.\n"\
+    "The timeout controls how long commands wait for responses.\n"\
+    "\n"\
+    "Parameters\n"\
+    "----------\n"\
+    "socket_path: str\n"\
+    "    Absolute path to the daemon Unix socket (matches configuration).\n"\
+    "timeout_ms: int, default 5000\n"\
+    "    Milliseconds to wait for each daemon response before timing out.";
 const char* HotkeyManagerInterface_authenticate_docstring = \
-    "Authenticate with the hotkey manager using a password.";
+    "authenticate($self, password: str)\n"\
+    "--\n"\
+    "\n"\
+    "Authenticate this process with the daemon using the configured password.\n"\
+    "The cleartext password travels inside the encrypted channel alongside the\n"\
+    "current pid:uid:gid tuple.\n"\
+    "\n"\
+    "Parameters\n"\
+    "----------\n"\
+    "password: str\n"\
+    "    Plaintext password whose Argon2 hash is stored in the daemon config.\n"\
+    "\n"\
+    "Raises\n"\
+    "------\n"\
+    "RuntimeError\n"\
+    "    Raised when authentication fails or the session is already authenticated.";
 const char* HotkeyManagerInterface_register_hotkey_docstring = \
-    "Register a hotkey with a callback function.";
+    "register_hotkey($self, hotkey: str, callback: Callable[[], None])\n"\
+    "--\n"\
+    "\n"\
+    "Register a hotkey expression and associate a zero-argument callback.\n"\
+    "The daemon validates the expression (combinations, Double(...), Hold(...),\n"\
+    "etc.) and returns the canonicalized string, which is also returned here.\n"\
+    "Callbacks are invoked on the thread running mainloop().\n"\
+    "\n"\
+    "Parameters\n"\
+    "----------\n"\
+    "hotkey: str\n"\
+    "    Hotkey grammar accepted by the daemon (e.g. 'LEFTCTRL + C', 'Double(ESC)').\n"\
+    "callback: Callable[[], None]\n"\
+    "    Zero-argument callable executed whenever the daemon signals the hotkey.\n"\
+    "\n"\
+    "Returns\n"\
+    "-------\n"\
+    "str\n"\
+    "    Canonical hotkey string as normalized by the daemon.\n"\
+    "\n"\
+    "Raises\n"\
+    "------\n"\
+    "RuntimeError\n"\
+    "    Raised if the expression is invalid or the session is not authenticated.";
 const char* HotkeyManagerInterface_delete_hotkey_docstring = \
-    "Delete all callback functions for a hotkey.";
+    "delete_hotkey($self, hotkey: str)\n"\
+    "--\n"\
+    "\n"\
+    "Remove all callbacks registered for the given hotkey expression and drop\n"\
+    "the daemon-side mapping. The expression is normalized before removal.\n"\
+    "\n"\
+    "Parameters\n"\
+    "----------\n"\
+    "hotkey: str\n"\
+    "    Hotkey expression previously registered with register_hotkey().\n"\
+    "\n"\
+    "Raises\n"\
+    "------\n"\
+    "RuntimeError\n"\
+    "    Raised if the hotkey has not been registered for this session.";
 const char* HotkeyManagerInterface_delete_callback_docstring = \
-    "Delete the given callback function.";
+    "delete_callback($self, callback: Callable[[], None])\n"\
+    "--\n"\
+    "\n"\
+    "Remove a previously registered callback object from every hotkey.\n"\
+    "If the last callback for a hotkey disappears, the daemon mapping is cleared.\n"\
+    "\n"\
+    "Parameters\n"\
+    "----------\n"\
+    "callback: Callable[[], None]\n"\
+    "    The same Python callable object previously passed to register_hotkey().\n"\
+    "\n"\
+    "Raises\n"\
+    "------\n"\
+    "RuntimeError\n"\
+    "    Raised when the callback is unknown for this session.";
 const char* HotkeyManagerInterface_mainloop_docstring = \
-    "Start the main event loop to listen for hotkey events.";
+    "mainloop($self, keep_running: Optional[Callable[[], bool]] = None)\n"\
+    "--\n"\
+    "\n"\
+    "Enter the event loop to dispatch hotkey callbacks. The optional\n"\
+    "keep_running callable is evaluated each iteration to allow cooperative\n"\
+    "shutdown. Pending signals (e.g. KeyboardInterrupt) are propagated back to\n"\
+    "the caller.\n"\
+    "\n"\
+    "Parameters\n"\
+    "----------\n"\
+    "keep_running: Optional[Callable[[], bool]]\n"\
+    "    Callable returning True to continue looping; returning False or raising\n"\
+    "    an exception stops the loop. When None, the loop runs until interrupted.";
 
 } // namespace hotkey_manager

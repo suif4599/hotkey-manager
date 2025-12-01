@@ -1,0 +1,3 @@
+#pragma once
+
+#define CONFIG_FILE_PATH "@HOTKEY_MANAGER_CONFIG_PATH@"

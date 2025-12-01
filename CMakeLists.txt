@@ -36,6 +36,56 @@ pkg_check_modules(LIBSODIUM libsodium)
 if(NOT LIBSODIUM_FOUND)
     message(FATAL_ERROR "libsodium library not found. Please install libsodium development packages.")
 endif()
+## Check if gzip and manpath exists for manual page installation
+find_program(GZIP_EXECUTABLE gzip)
+set(INSTALL_MANPAGES OFF)
+if(NOT GZIP_EXECUTABLE)
+    message(WARNING "gzip not found. Manual pages will not be installed.")
+else()
+    find_program(MANPATH_EXECUTABLE manpath)
+    if(NOT MANPATH_EXECUTABLE)
+        message(WARNING "manpath not found. Manual pages will not be installed.")
+    else()
+        execute_process(
+            COMMAND ${MANPATH_EXECUTABLE}
+            RESULT_VARIABLE _manpath_status
+            OUTPUT_VARIABLE _manpath_output
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        if(NOT _manpath_status EQUAL "0" OR _manpath_output STREQUAL "")
+            message(WARNING "Failed to detect manual path. Manual pages will not be installed.")
+        else()
+            string(REPLACE ":" ";" _manpath_list "${_manpath_output}")
+            set(MANPAGE_ROOT_DIR "")
+            set(_preferred_man_roots "/usr/local/share/man" "/usr/share/man")
+            foreach(_preferred IN LISTS _preferred_man_roots)
+                foreach(_candidate IN LISTS _manpath_list)
+                    if(EXISTS "${_candidate}" AND "${_candidate}" STREQUAL "${_preferred}")
+                        set(MANPAGE_ROOT_DIR "${_candidate}")
+                        break()
+                    endif()
+                endforeach()
+                if(NOT MANPAGE_ROOT_DIR STREQUAL "")
+                    break()
+                endif()
+            endforeach()
+            if(MANPAGE_ROOT_DIR STREQUAL "")
+                foreach(_candidate IN LISTS _manpath_list)
+                    if(EXISTS "${_candidate}")
+                        set(MANPAGE_ROOT_DIR "${_candidate}")
+                        break()
+                    endif()
+                endforeach()
+            endif()
+            if(MANPAGE_ROOT_DIR STREQUAL "")
+                message(WARNING "No valid manual path found. Manual pages will not be installed.")
+            else()
+                set(INSTALL_MANPAGES ON)
+                message(STATUS "Manual pages will be installed under ${MANPAGE_ROOT_DIR}")
+            endif()
+        endif()
+    endif()
+endif()
 
 
 # Source files
@@ -50,6 +100,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include(GNUInstallDirs)
+set(HOTKEY_MANAGER_CONFIG_PATH "${CMAKE_INSTALL_FULL_SYSCONFDIR}/hotkey-manager-config.json")
+set(SYSTEMD_UNIT_INSTALL_DIR "/etc/systemd/system")
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/config.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/config.h"
+    @ONLY
+)
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
 
 # Targets
@@ -180,6 +238,32 @@ if (BUILD_PYTHON_MODULE)
     )
 endif()
 
+# Manual pages
+if(INSTALL_MANPAGES)
+    set(MANPAGE_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/man")
+    file(MAKE_DIRECTORY "${MANPAGE_BUILD_DIR}")
+    set(_MANPAGE_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/man/hotkey_manager.3.in"
+        "${CMAKE_CURRENT_SOURCE_DIR}/man/hotkey-manager-daemon.1.in"
+    )
+    set(MANPAGE_OUTPUTS)
+    foreach(_manpage IN LISTS _MANPAGE_SOURCES)
+        get_filename_component(_manpage_name "${_manpage}" NAME)
+        string(REGEX REPLACE "\\.in$" "" _configured_name "${_manpage_name}")
+        set(_configured_path "${MANPAGE_BUILD_DIR}/${_configured_name}")
+        configure_file("${_manpage}" "${_configured_path}" @ONLY)
+        add_custom_command(
+            OUTPUT "${_configured_path}.gz"
+            COMMAND ${GZIP_EXECUTABLE} -f -k "${_configured_path}"
+            DEPENDS "${_configured_path}"
+            COMMENT "Compressing ${_configured_name} manual"
+            VERBATIM
+        )
+        list(APPEND MANPAGE_OUTPUTS "${_configured_path}.gz")
+    endforeach()
+    add_custom_target(manpages ALL DEPENDS ${MANPAGE_OUTPUTS})
+endif()
+
 
 # Install Targets
 ## Daemon (System Service)
@@ -196,7 +280,7 @@ configure_file(
     @ONLY
 )
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hotkey-manager-daemon.service"
-    DESTINATION /etc/systemd/system
+    DESTINATION ${SYSTEMD_UNIT_INSTALL_DIR}
 )
 ### Enable service
 if (ENABLE_DAEMON OR START_DAEMON)
@@ -219,6 +303,15 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/ipc/
 )
 ### Refresh the shared library cache
 install(CODE "execute_process(COMMAND ldconfig)")
+## Manual Pages
+if(INSTALL_MANPAGES)
+    install(FILES "${MANPAGE_BUILD_DIR}/hotkey-manager-daemon.1.gz"
+        DESTINATION "${MANPAGE_ROOT_DIR}/man1"
+    )
+    install(FILES "${MANPAGE_BUILD_DIR}/hotkey_manager.3.gz"
+        DESTINATION "${MANPAGE_ROOT_DIR}/man3"
+    )
+endif()
 
 
 # Uninstall Target
