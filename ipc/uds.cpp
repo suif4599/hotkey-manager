@@ -71,15 +71,24 @@ std::ostream& operator<<(std::ostream& os, const ClientInfo& info) {
     return os;
 }
 
-UnixDomainSocket::UnixDomainSocket(const std::string& path) {
-    syslog(LOG_INFO, "Creating UnixDomainSocket with path: %s", path.c_str());
+UnixDomainSocket::UnixDomainSocket(const std::string& path)
+: fd(-1)
+, addr{}
+, socketPath(path) {
+    syslog(LOG_INFO, "Creating UnixDomainSocket with path: %s", socketPath.c_str());
     fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd == -1)
         throw std::runtime_error("Failed to create socket");
 
-    memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
+    strncpy(addr.sun_path, socketPath.c_str(), sizeof(addr.sun_path) - 1);
+}
+
+UnixDomainSocket::~UnixDomainSocket() {
+    if (fd != -1) {
+        close(fd);
+        fd = -1;
+    }
 }
 
 UnixDomainSocketServer::UnixDomainSocketServer(const std::string& path)
@@ -87,27 +96,46 @@ UnixDomainSocketServer::UnixDomainSocketServer(const std::string& path)
 , clientMapping()
 , newClients()
 , deletedClients() {
-    syslog(LOG_INFO, "Creating UnixDomainSocketServer with path: %s", path.c_str());
-    unlink(path.c_str()); // Remove existing socket file
+    syslog(LOG_INFO, "Creating UnixDomainSocketServer with path: %s", socketPath.c_str());
+    unlink(socketPath.c_str()); // Remove existing socket file
     if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
         close(fd);
+        fd = -1;
         throw std::runtime_error("Failed to bind socket");
     }
 
     if (listen(fd, BACK_LOG) == -1) {
         close(fd);
+        fd = -1;
         throw std::runtime_error("Failed to listen on socket");
     }
 
     setNonBlocking(fd);
-    if (chmod(path.c_str(), 0666) == -1) {
+    if (chmod(socketPath.c_str(), 0666) == -1) {
         close(fd);
+        fd = -1;
         throw std::runtime_error("Failed to set socket permissions");
     }
 
     FD_ZERO(&master_fds);
     FD_SET(fd, &master_fds); // Only the listening socket for now
     max_fd = fd;
+}
+
+UnixDomainSocketServer::~UnixDomainSocketServer() {
+    syslog(LOG_INFO, "Destroying UnixDomainSocketServer with path: %s", socketPath.c_str());
+    for (const auto& [clientFd, _] : clientMapping) {
+        if (clientFd >= 0)
+            close(clientFd);
+    }
+    clientMapping.clear();
+    newClients.clear();
+    deletedClients = std::queue<int>();
+
+    if (!socketPath.empty()) {
+        if (unlink(socketPath.c_str()) == -1 && errno != ENOENT)
+            syslog(LOG_WARNING, "Failed to unlink socket file %s: %s", socketPath.c_str(), strerror(errno));
+    }
 }
 
 void UnixDomainSocketServer::next() {
@@ -272,6 +300,7 @@ UnixDomainSocketClient::UnixDomainSocketClient(
 , timeoutMs(timeoutMs) {
     if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
         close(fd);
+        fd = -1;
         throw std::runtime_error("Failed to connect to server socket");
     }
 
@@ -279,11 +308,13 @@ UnixDomainSocketClient::UnixDomainSocketClient(
     socklen_t len = sizeof(cred);
     if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) == -1) {
         close(fd);
+        fd = -1;
         throw std::runtime_error("Failed to get server credentials");
     }
     if (cred.uid != 0) {
         // Server socket must be owned by root
         close(fd);
+        fd = -1;
         throw std::runtime_error("Server socket is tampered (not owned by root)");
     }
     setNonBlocking(fd);

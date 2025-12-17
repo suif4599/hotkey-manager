@@ -36,8 +36,14 @@ class UnixDomainSocket {
 protected:
     int fd;
     struct sockaddr_un addr;
+    std::string socketPath;
 public:
     explicit UnixDomainSocket(const std::string& path);
+    virtual ~UnixDomainSocket();
+    UnixDomainSocket(const UnixDomainSocket&) = delete;
+    UnixDomainSocket& operator=(const UnixDomainSocket&) = delete;
+    UnixDomainSocket(UnixDomainSocket&&) = delete;
+    UnixDomainSocket& operator=(UnixDomainSocket&&) = delete;
 };
 
 class UnixDomainSocketServer : public UnixDomainSocket {
@@ -49,6 +55,7 @@ class UnixDomainSocketServer : public UnixDomainSocket {
     std::queue<int> deletedClients;
 public:
     explicit UnixDomainSocketServer(const std::string& path);
+    ~UnixDomainSocketServer() override;
     void next();
     void deleteClient(int clientFd);
     void sendResponse(int clientFd, const std::string& response);
