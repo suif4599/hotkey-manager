@@ -310,7 +310,7 @@ void HotkeyManager::closeSession(int clientFd) {
 }
 
 HotkeyManager& HotkeyManager::getInstance(const std::string& configFile) {
-    static HotkeyManagerConfig config = HotkeyManagerConfig::getInstance(configFile);
+    static HotkeyManagerConfig& config = HotkeyManagerConfig::getInstance(configFile);
     static HotkeyManager instance(
         config["deviceFile"],
         config["socketPath"],
@@ -319,6 +319,7 @@ HotkeyManager& HotkeyManager::getInstance(const std::string& configFile) {
     static bool initialized = false;
     if (initialized && !configFile.empty())
         throw std::runtime_error("HotkeyManager should not be initialized twice.");
+    initialized = true;
     return instance;
 }
 

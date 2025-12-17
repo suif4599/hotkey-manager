@@ -15,6 +15,12 @@ class Keyboard {
     Keyboard();
 public:
     ~Keyboard() = default;
+
+    Keyboard(const Keyboard&) = delete;
+    Keyboard& operator=(const Keyboard&) = delete;
+    Keyboard(Keyboard&&) = delete;
+    Keyboard& operator=(Keyboard&&) = delete;
+
     static Keyboard& getInstance();
     void update(const Event& ev);
     bool check(Condition& cond) const;
@@ -29,6 +35,12 @@ class KeyMapper {
     KeyMapper();
 public:
     ~KeyMapper() = default;
+
+    KeyMapper(const KeyMapper&) = delete;
+    KeyMapper& operator=(const KeyMapper&) = delete;
+    KeyMapper(KeyMapper&&) = delete;
+    KeyMapper& operator=(KeyMapper&&) = delete;
+
     const std::string& operator[](key_t keycode) const;
     key_t operator[](const std::string& keyname) const;
     friend std::ostream& operator<<(std::ostream& os, const KeyMapper& mapper);

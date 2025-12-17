@@ -45,6 +45,11 @@ class HotkeyManagerConfig {
     void createDefaultConfig();
     HotkeyManagerConfig(const std::string& filePath);
 public:
+    HotkeyManagerConfig(const HotkeyManagerConfig&) = delete;
+    HotkeyManagerConfig& operator=(const HotkeyManagerConfig&) = delete;
+    HotkeyManagerConfig(HotkeyManagerConfig&&) = delete;
+    HotkeyManagerConfig& operator=(HotkeyManagerConfig&&) = delete;
+
     static HotkeyManagerConfig& getInstance(const std::string& configFile = "");
     std::string& operator[](const std::string& key);
     const std::string& operator[](const std::string& key) const;
@@ -78,6 +83,11 @@ class HotkeyManager {
     );
     void closeSession(int clientFd);
 public:
+    HotkeyManager(const HotkeyManager&) = delete;
+    HotkeyManager& operator=(const HotkeyManager&) = delete;
+    HotkeyManager(HotkeyManager&&) = delete;
+    HotkeyManager& operator=(HotkeyManager&&) = delete;
+
     static HotkeyManager& getInstance(const std::string& configFile = "");
     ~HotkeyManager();
     void mainloop();
