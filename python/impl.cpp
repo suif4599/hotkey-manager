@@ -180,10 +180,12 @@ extern "C" PyObject* authenticate(HotkeyManagerInterfaceObject* self, PyObject* 
 extern "C" PyObject* register_hotkey(HotkeyManagerInterfaceObject* self, PyObject* args, PyObject* kwargs) {
     PyObject* hotkeyStrObj = nullptr;
     PyObject* callbackObj = nullptr;
+    PyObject* passThroughObj = nullptr;
     static char kw_hotkey[] = "hotkey";
     static char kw_callback[] = "callback";
-    static char* kwlist[] = {kw_hotkey, kw_callback, nullptr};
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO", kwlist, &hotkeyStrObj, &callbackObj))
+    static char kw_pass_through[] = "pass_through";
+    static char* kwlist[] = {kw_hotkey, kw_callback, kw_pass_through, nullptr};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|O", kwlist, &hotkeyStrObj, &callbackObj, &passThroughObj))
         return nullptr;
 
     if (!PyUnicode_Check(hotkeyStrObj)) {
@@ -194,12 +196,21 @@ extern "C" PyObject* register_hotkey(HotkeyManagerInterfaceObject* self, PyObjec
         PyErr_SetString(PyExc_TypeError, "callback must be callable");
         return nullptr;
     }
+    if (passThroughObj != nullptr && !PyBool_Check(passThroughObj)) {
+        PyErr_SetString(PyExc_TypeError, "pass_through must be a boolean");
+        return nullptr;
+    }
 
     std::string hotkeyUtf8;
     if (!UnicodeToUtf8(hotkeyStrObj, hotkeyUtf8))
         return nullptr;
 
     Py_INCREF(callbackObj);
+
+    bool passThrough = false;
+    if (passThroughObj != nullptr) {
+        passThrough = (passThroughObj == Py_True);
+    }
 
     // Use callback object's address and a number as functionId
     self->callbackCount++;
@@ -236,7 +247,8 @@ extern "C" PyObject* register_hotkey(HotkeyManagerInterfaceObject* self, PyObjec
                 }
                 PyGILState_Release(gstate);
             },
-            functionId
+            functionId,
+            passThrough
         );
     } catch (const std::exception& e) {
         failed = true;
@@ -530,7 +542,7 @@ const char* HotkeyManagerInterface_authenticate_docstring = \
     "RuntimeError\n"\
     "    Raised when authentication fails or the session is already authenticated.";
 const char* HotkeyManagerInterface_register_hotkey_docstring = \
-    "register_hotkey($self, hotkey: str, callback: Callable[[], None])\n"\
+    "register_hotkey($self, hotkey: str, callback: Callable[[], None], pass_through: bool = False)\n"\
     "--\n"\
     "\n"\
     "Register a hotkey expression and associate a zero-argument callback.\n"\
@@ -544,6 +556,9 @@ const char* HotkeyManagerInterface_register_hotkey_docstring = \
     "    Hotkey grammar accepted by the daemon (e.g. 'LEFTCTRL + C', 'Double(ESC)').\n"\
     "callback: Callable[[], None]\n"\
     "    Zero-argument callable executed whenever the daemon signals the hotkey.\n"\
+    "pass_through: bool, default False\n"\
+    "    If True, the hotkey key events are also passed through to the OS;\n"\
+    "    otherwise, the daemon suppresses them system-wide.\n"\
     "\n"\
     "Returns\n"\
     "-------\n"\

@@ -14,7 +14,7 @@ class HotkeyManagerInterface:
     def authenticate(self, password: str) -> None:
         "Authenticate this process with the daemon using the configured password."
 
-    def register_hotkey(self, hotkey: str, callback: Callable[[], None]) -> str:
+    def register_hotkey(self, hotkey: str, callback: Callable[[], None], pass_through: bool = False) -> str:
         "Register a hotkey expression and associate a zero-argument callback."
     
     def delete_hotkey(self, hotkey: str) -> None:

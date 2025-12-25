@@ -21,7 +21,7 @@ namespace hotkey_manager {
 // (Text) getPublicKey -> publicKey
 // (Encrypted) RegisterPublicKey(publicKey) -> "[OK]"
 // (Encrypted) Authenticate(passward, pid:uid:gid) -> "[OK]" / "[Error]: ..."
-// (Encrypted) RegisterHotkey(conditionStr) -> "[OK]: hotkeyStr" / "[Error]: ..."; Allow Reregistering same hotkey
+// (Encrypted) RegisterHotkey(conditionStr; true/false) -> "[OK]: hotkeyStr" / "[Error]: ..."; Allow Reregistering same hotkey
 // (Encrypted) DeleteHotkey(hotkeyStr) -> "[OK]" / "[Error]: ..."
 // (Encrypted) KeepAlive() -> "[OK]" / "[Error]: ..."; Error only if not authenticated
 // (Encrypted) CloseSession() -> "[OK]"
@@ -59,8 +59,9 @@ public:
 class HotkeyManager {
     Keyboard& keyboard;
     std::map<int, Session*> sessionMap; // Maintain life cycle of Session*
-    std::unordered_map<Condition*, std::vector<Session*>> hotkeyMap; // Borrow Session*, Maintain Condition*
+    std::unordered_map<Condition*, std::vector<std::pair<Session*, bool>>> hotkeyMap; // Borrow Session*, Maintain Condition*
     Device device;
+    bool grabDevice;
     UnixDomainSocketServer server;
     Encryptor encryptor;
     std::string passwordHash;
@@ -79,7 +80,8 @@ class HotkeyManager {
     HotkeyManager(
         const std::string& file,
         const std::string& socketPath,
-        const std::string& passwordHash
+        const std::string& passwordHash,
+        bool grabDevice
     );
     void closeSession(int clientFd);
 public:
@@ -88,7 +90,10 @@ public:
     HotkeyManager(HotkeyManager&&) = delete;
     HotkeyManager& operator=(HotkeyManager&&) = delete;
 
-    static HotkeyManager& getInstance(const std::string& configFile = "");
+    static HotkeyManager& getInstance(
+        const std::string& configFile = "",
+        bool grabDevice = false
+    );
     ~HotkeyManager();
     void mainloop();
 };

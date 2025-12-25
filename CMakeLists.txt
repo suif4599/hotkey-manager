@@ -9,6 +9,8 @@ option(PYTHON_EXECUTABLE "Specify the Python executable for bindings" "")
 ## Daemon Service
 option(ENABLE_DAEMON "Enable building hotkey-manager-daemon service" ON)
 option(START_DAEMON "Enable and start hotkey-manager-daemon service after installation" ON)
+## Grab Device
+option(GRAB_DEVICE "Have the daemon grab the input device to prevent other processes from receiving events" ON)
 
 
 # Condition Check
@@ -117,6 +119,9 @@ target_include_directories(hotkey-manager-daemon PRIVATE ${LIBEVDEV_INCLUDE_DIRS
 target_include_directories(hotkey-manager-daemon PRIVATE ${LIBSODIUM_INCLUDE_DIRS})
 target_link_libraries(hotkey-manager-daemon PRIVATE ${LIBEVDEV_LIBRARIES})
 target_link_libraries(hotkey-manager-daemon PRIVATE ${LIBSODIUM_LIBRARIES})
+if (GRAB_DEVICE)
+    target_compile_definitions(hotkey-manager-daemon PRIVATE ENABLE_GRAB_DEVICE)
+endif()
 ## Library
 add_library(hotkey-manager-client SHARED ${CLIENT_SOURCES} ${IPC_SOURCES})
 target_include_directories(hotkey-manager-client

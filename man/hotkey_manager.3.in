@@ -107,7 +107,7 @@ Authenticates the session by sending an encrypted
 command containing the supplied password and the calling process credentials
 .RI ( pid:uid:gid ).
 .TP
-.BI "std::string registerHotkey(const std::string& " hotkeyStr ", std::function<void()> " callback ", std::string " functionId " = std::string())"
+.BI "std::string registerHotkey(const std::string& " hotkeyStr ", std::function<void()> " callback ", std::string " functionId " = std::string(), bool " passThrough " = false)"
 Registers a hotkey expression.  The daemon returns the canonical string, which
 is also used as the key inside the internal callback table.  Duplicate
 .I functionId

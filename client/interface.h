@@ -30,7 +30,8 @@ public:
     std::string registerHotkey(
         const std::string& hotkeyStr,
         std::function<void()> callback,
-        std::string functionId = ""
+        std::string functionId = "",
+        bool passThrough = false
     );
     void deleteHotkey(const std::string& hotkeyStr);
     void deleteCallback(std::string functionId);

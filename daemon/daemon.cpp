@@ -100,7 +100,14 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     try {
-        HotkeyManager::getInstance(CONFIG_FILE_PATH).mainloop();
+        #ifdef ENABLE_GRAB_DEVICE
+        bool grabDevice = true;
+        syslog(LOG_INFO, "GRAB_DEVICE is enabled.");
+        #else
+        bool grabDevice = false;
+        syslog(LOG_INFO, "GRAB_DEVICE is disabled.");
+        #endif
+        HotkeyManager::getInstance(CONFIG_FILE_PATH, grabDevice).mainloop();
     } catch (const std::exception& e) {
         syslog(LOG_ERR, "Fatal error: %s", e.what());
         closelog();

@@ -20,7 +20,7 @@ using namespace hotkey_manager;
 namespace hotkey_manager {
 
 static auto findHotkeyEntry(
-    std::unordered_map<Condition*, std::vector<Session*>>& map,
+    std::unordered_map<Condition*, std::vector<std::pair<Session*, bool>>>& map,
     const Condition& target
 ) -> decltype(map.begin()) {
     return std::find_if(
@@ -232,11 +232,13 @@ void HotkeyManagerConfig::save() const {
 HotkeyManager::HotkeyManager(
     const std::string& file,
     const std::string& socketPath,
-    const std::string& passwordHash
+    const std::string& passwordHash,
+    bool grabDevice
 ): keyboard(Keyboard::getInstance())
 , sessionMap()
 , hotkeyMap()
-, device(file)
+, device(file, grabDevice)
+, grabDevice(grabDevice)
 , server(socketPath)
 , encryptor()
 , commands()
@@ -289,7 +291,9 @@ void HotkeyManager::closeSession(int clientFd) {
     // Remove session from hotkeyMap
     for (auto& [cond, sessions] : hotkeyMap) {
         sessions.erase(
-            std::remove(sessions.begin(), sessions.end(), session),
+            std::remove_if(sessions.begin(), sessions.end(), [session](const std::pair<Session*, bool>& p) {
+                return p.first == session;
+            }),
             sessions.end()
         );
     }
@@ -309,12 +313,16 @@ void HotkeyManager::closeSession(int clientFd) {
     delete session;
 }
 
-HotkeyManager& HotkeyManager::getInstance(const std::string& configFile) {
+HotkeyManager& HotkeyManager::getInstance(
+    const std::string& configFile,
+    bool grabDevice
+) {
     static HotkeyManagerConfig& config = HotkeyManagerConfig::getInstance(configFile);
     static HotkeyManager instance(
         config["deviceFile"],
         config["socketPath"],
-        config["passwordHash"]
+        config["passwordHash"],
+        grabDevice
     );
     static bool initialized = false;
     if (initialized && !configFile.empty())
@@ -324,7 +332,7 @@ HotkeyManager& HotkeyManager::getInstance(const std::string& configFile) {
 }
 
 HotkeyManager::~HotkeyManager() {
-    for (auto& [cond, session] : hotkeyMap)
+    for (auto& [cond, _] : hotkeyMap)
         delete cond;
     for (auto& [fd, session] : sessionMap)
         delete session;
@@ -391,18 +399,23 @@ void HotkeyManager::mainloop() {
             continue;
         }
         keyboard.update(*ev);
+        bool suppressed = false;
         for (auto& [cond, sessions] : hotkeyMap) {
             if (!keyboard.check(*cond))
                 continue;
             syslog(LOG_DEBUG, "Hotkey triggered: %s", cond->to_string().c_str());
-            for (auto& session : sessions) {
+            for (auto& [session, passThrough] : sessions) {
                 server.sendResponse(
                     session->getFd(),
                     encryptor.encrypt("[HOTKEY]: " + cond->to_string(), session->getPublicKey())
                 );
+                if (!passThrough)
+                    suppressed = true;
             }
             updated = true;
         }
+        if (grabDevice && !suppressed)
+            device.passThroughEvent(*ev);
         delete ev;
 
         // Delete sessions with timeout
@@ -499,6 +512,7 @@ std::string HotkeyManager::commandAuthenticate(int clientFd, const std::string& 
 }
 
 std::string HotkeyManager::commandRegisterHotkey(int clientFd, const std::string& args) {
+    static const std::regex hotkeyRe {"^(.+); *(true|false)$"};
     if (!sessionMap[clientFd]->isAuthenticated()) {
         syslog(LOG_NOTICE, "ClientFd=%d attempted to register hotkey without authentication", clientFd);
         deleteWaitlist.push_back(clientFd);
@@ -507,23 +521,36 @@ std::string HotkeyManager::commandRegisterHotkey(int clientFd, const std::string
 
     syslog(LOG_INFO, "Registering hotkey for clientFd=%d with condition: %s", clientFd, args.c_str());
     try {
-        std::unique_ptr<Condition> parsedCond(new Condition(Condition::from_string(args)));
+        std::smatch match;
+        if (!std::regex_match(args, match, hotkeyRe)) {
+            syslog(LOG_NOTICE, "Invalid hotkey registration arguments from clientFd=%d: %s", clientFd, args.c_str());
+            return "[Error]: Invalid hotkey registration arguments, expected format RegisterHotkey(<conditionStr>; <true/false>)";
+        }
+        bool passThrough = (match[2] == "true");
+
+        std::unique_ptr<Condition> parsedCond(new Condition(Condition::from_string(match[1])));
         auto it = findHotkeyEntry(hotkeyMap, *parsedCond);
 
         if (it == hotkeyMap.end()) {
             Condition* storedCond = parsedCond.release();
-            auto insertResult = hotkeyMap.emplace(storedCond, std::vector<Session*>());
+            auto insertResult = hotkeyMap.emplace(storedCond, std::vector<std::pair<Session*, bool>>());
             it = insertResult.first;
         }
 
         auto* session = sessionMap[clientFd];
         auto& sessions = it->second;
-        auto itSession = std::find(sessions.begin(), sessions.end(), session);
+        auto itSession = std::find_if(
+            sessions.begin(),
+            sessions.end(),
+            [session](const std::pair<Session*, bool>& p) {
+                return p.first == session;
+            }
+        );
         if (itSession != sessions.end()) {
             return "[OK]: " + it->first->to_string();
         }
 
-        sessions.push_back(session);
+        sessions.push_back(std::make_pair(session, passThrough));
         return "[OK]: " + it->first->to_string();
     } catch (const std::exception& e) {
         syslog(LOG_NOTICE, "Failed to register hotkey for clientFd=%d: %s", clientFd, e.what());
@@ -547,7 +574,13 @@ std::string HotkeyManager::commandDeleteHotkey(int clientFd, const std::string& 
         }
         auto& sessions = it->second;
         sessions.erase(
-            std::remove(sessions.begin(), sessions.end(), sessionMap[clientFd]),
+            std::remove_if(
+                sessions.begin(),
+                sessions.end(),
+                [this, clientFd](const std::pair<Session*, bool>& p) {
+                    return p.first == sessionMap[clientFd];
+                }
+            ),
             sessions.end()
         );
         // Delete unused Conditions

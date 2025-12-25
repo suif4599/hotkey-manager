@@ -58,7 +58,8 @@ HotkeyInterface::~HotkeyInterface() {
 std::string HotkeyInterface::registerHotkey(
     const std::string& hotkeyStr,
     std::function<void()> callback,
-    std::string functionId
+    std::string functionId,
+    bool passThrough
 ) {
     std::lock_guard<std::recursive_mutex> lock(interfaceMutex);
     // Don't allow duplicate non-empty functionId
@@ -72,7 +73,7 @@ std::string HotkeyInterface::registerHotkey(
         }
     }
     static const std::regex hotkeyRe {"^\\[OK\\]: *(.+)$"};
-    std::string command = "RegisterHotkey(" + hotkeyStr + ")";
+    std::string command = "RegisterHotkey(" + hotkeyStr + "; " + (passThrough ? "true" : "false") + ")";
     std::string encryptedCmd = encryptor.encrypt(command, serverPublicKey);
     std::string* response = client.sendCommand(encryptedCmd);
     if (!response)

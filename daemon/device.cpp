@@ -26,7 +26,7 @@ static bool isKeyboard(const std::string& path) {
     return result;
 }
 
-Device::Device(const std::string& file) {
+Device::Device(const std::string& file, bool grab) {
     fd = open(file.c_str(), O_RDONLY);
     if (fd < 0) {
         throw std::runtime_error("Failed to open device file: " + file);
@@ -47,6 +47,30 @@ Device::Device(const std::string& file) {
         libevdev_free(dev);
         close(fd);
         throw std::runtime_error("Device does not support key events: " + file);
+    }
+
+    if (!grab) {
+        uidev = nullptr;
+        return;
+    }
+
+    if (
+        libevdev_uinput_create_from_device(
+            dev,
+            LIBEVDEV_UINPUT_OPEN_MANAGED,
+            &uidev
+        ) < 0
+    ) {
+        libevdev_free(dev);
+        close(fd);
+        throw std::runtime_error("Failed to create uinput device from: " + file);
+    }
+
+    if (libevdev_grab(dev, LIBEVDEV_GRAB) < 0) {
+        libevdev_uinput_destroy(uidev);
+        libevdev_free(dev);
+        close(fd);
+        throw std::runtime_error("Failed to grab device: " + file);
     }
 };
 
@@ -75,8 +99,15 @@ Event* Device::next() const {
     struct input_event ev;
     int rc = libevdev_next_event(dev, LIBEVDEV_READ_FLAG_NORMAL, &ev);
     if (rc == LIBEVDEV_READ_STATUS_SUCCESS) {
-        if (ev.type != EV_KEY)
+        if (ev.type != EV_KEY) {
+            if (!uidev)
+                return nullptr;
+            if (libevdev_uinput_write_event(uidev, ev.type, ev.code, ev.value) < 0 ||
+                libevdev_uinput_write_event(uidev, EV_SYN, SYN_REPORT, 0) < 0) {
+                throw std::runtime_error("Failed to write non-key event to uinput device");
+            }
             return nullptr;
+        }
         switch (ev.value) {
             case 1:
                 return new PressEvent(ev.code);
@@ -91,6 +122,39 @@ Event* Device::next() const {
     if (rc == LIBEVDEV_READ_STATUS_SYNC || rc == -EAGAIN)
         return nullptr;
     throw std::runtime_error("Error reading event from device");
+}
+
+void Device::passThroughEvent(const Event& ev) const {
+    if (!uidev)
+        throw std::runtime_error("Uinput device not initialized for pass-through");
+
+    int value;
+    switch (ev.get_type()) {
+        case 1:
+            value = 1; // Press
+            break;
+        case 2:
+            value = 0; // Release
+            break;
+        case 3:
+            value = 2; // Repeat
+            break;
+        default:
+            throw std::runtime_error("Unknown event type for pass-through");
+    }
+
+    if (libevdev_uinput_write_event(uidev, EV_KEY, ev.get_key(), value) < 0 ||
+        libevdev_uinput_write_event(uidev, EV_SYN, SYN_REPORT, 0) < 0) {
+        throw std::runtime_error("Failed to write event to uinput device");
+    }
+
+    if (libevdev_uinput_write_event(uidev, EV_SYN, SYN_REPORT, 0) < 0) {
+        throw std::runtime_error("Failed to write SYN event to uinput device");
+    }
+}
+
+bool Device::isGrabbed() const {
+    return uidev != nullptr;
 }
 
 } // namespace hotkey_manager
