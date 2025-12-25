@@ -28,6 +28,16 @@ against the daemon without handling sockets or cryptographic primitives
 directly.
 
 .PP
+The daemon can optionally rewrite key codes before hotkey evaluation using the
+.I keyBinding
+configuration field (comma-separated
+.I FROM->TO
+remaps based on libevdev key names).  Hotkey strings observed by the client
+reflect the remapped values.  See
+.BR hotkey-manager-daemon (1)
+for configuration syntax and examples.
+
+.PP
 The library performs the following responsibilities:
 .IP \(bu 2
 Establishes a Unix domain socket connection and validates that the peer is

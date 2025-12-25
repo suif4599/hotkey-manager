@@ -63,13 +63,15 @@ The install target places the daemon in `/usr/local/bin`, installs headers and t
 {
 	"deviceFile": "auto",
 	"socketPath": "/tmp/hotkey-manager.sock",
-	"passwordHash": "$argon2id$..."
+	"passwordHash": "$argon2id$...",
+	"keyBinding": ""
 }
 ```
 
 - `deviceFile`: set to a specific `/dev/input/eventX` if auto-detection fails
 - `socketPath`: Unix domain socket exposed to clients
 - `passwordHash`: Argon2 hash used for client authentication
+- `keyBinding`: optional comma-separated key remaps in the form `FROM->TO`. Names must match `hotkey-manager-daemon keynames` output (without the `KEY_` prefix). Whitespace is ignored. Each source key may appear at most once and cannot map to itself. Example: `DELETE->F12, F12->DELETE, SYSRQ->F11, F11->SYSRQ`.
 
 ## Run the Daemon
 
@@ -86,7 +88,7 @@ Usage:
 | hotkey-manager-daemon | Start the daemon (Require ROOT) |
 | hotkey-manager-daemon hash <password> | Generate password hash for given password |
 | hotkey-manager-daemon keynames | List all available key names |
-| hotkey-manager-daemon set <field> <value> | Modify the config file (Require ROOT) |
+| hotkey-manager-daemon set <field> <value> | Modify the config file (Require ROOT). Fields: `deviceFile`, `socketPath`, `passwordHash`, `keyBinding`. |
 
 For example, use `sudo hotkey-manager-daemon set passwordHash $(hotkey-manager-daemon hash <password>)` to change password
 

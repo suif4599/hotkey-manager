@@ -36,6 +36,7 @@ static const std::regex configRe {
     "^\\s*\\{"
     "\\s*[\"'](\\w+)[\"']: *[\"']([\\s\\S]+?)[\"'],\\s*"
     "\\s*[\"'](\\w+)[\"']: *[\"']([\\s\\S]+?)[\"'],\\s*"
+    "\\s*[\"'](\\w+)[\"']: *[\"']([\\s\\S]+?)[\"'],\\s*"
     "\\s*[\"'](\\w+)[\"']: *[\"']([\\s\\S]+?)[\"'],?\\s*"
     "\\}\\s*$"
 };
@@ -83,6 +84,8 @@ void HotkeyManagerConfig::parseConfig(const std::string& content) {
             socketPath = value;
         else if (key == "passwordHash")
             passwordHash = value;
+        else if (key == "keyBinding")
+            keyBinding = value;
         else
             throw std::runtime_error("Unknown config key: " + key);
     }
@@ -118,7 +121,8 @@ void HotkeyManagerConfig::createDefaultConfig() {
         "{\n"
         "    \"deviceFile\": \"auto\",\n"
         "    \"socketPath\": \"/tmp/hotkey-manager.sock\",\n"
-        "    \"passwordHash\": \"$argon2id$v=19$m=65536,t=2,p=1$gVhSWbbAsC+mm2QfArc/xw$5fdVpc61mjx0xkbrMVi9YCXhIcl29h3fHvZkYO4TsIU\"\n"
+        "    \"passwordHash\": \"$argon2id$v=19$m=65536,t=2,p=1$gVhSWbbAsC+mm2QfArc/xw$5fdVpc61mjx0xkbrMVi9YCXhIcl29h3fHvZkYO4TsIU\",\n"
+        "    \"keyBinding\": \"\"\n"
         "}\n"
     }; // 123456
     ssize_t written = ::write(fd, payload.data(), payload.size());
@@ -187,6 +191,8 @@ std::string& HotkeyManagerConfig::operator[](const std::string& key) {
         return socketPath;
     else if (key == "passwordHash")
         return passwordHash;
+    else if (key == "keyBinding")
+        return keyBinding;
     else
         throw std::runtime_error("Unknown config key: " + key);
 }
@@ -199,6 +205,8 @@ const std::string& HotkeyManagerConfig::operator[](const std::string& key) const
         return socketPath;
     else if (key == "passwordHash")
         return passwordHash;
+    else if (key == "keyBinding")
+        return keyBinding;
     else
         throw std::runtime_error("Unknown config key: " + key);
 }
@@ -220,7 +228,8 @@ void HotkeyManagerConfig::save() const {
     file << "{\n"
             << "    \"deviceFile\": \"" << deviceFile << "\",\n"
             << "    \"socketPath\": \"" << socketPath << "\",\n"
-            << "    \"passwordHash\": \"" << passwordHash << "\"\n"
+            << "    \"passwordHash\": \"" << passwordHash << "\",\n"
+            << "    \"keyBinding\": \"" << keyBinding << "\"\n"
             << "}\n";
     file.close();
     if (!file)
@@ -233,6 +242,7 @@ HotkeyManager::HotkeyManager(
     const std::string& file,
     const std::string& socketPath,
     const std::string& passwordHash,
+    const std::string& keyBinding,
     bool grabDevice
 ): keyboard(Keyboard::getInstance())
 , sessionMap()
@@ -267,6 +277,23 @@ HotkeyManager::HotkeyManager(
     commands["FormatHotkey"] = [this](int clinetFd, const std::string& args) {
         return commandFormatHotkey(clinetFd, args);
     };
+
+    // Parse key bindings
+    if (!keyBinding.empty()) {
+        static const std::regex bindingRe(" *(\\w+)->(\\w+) *,?");
+        std::sregex_iterator iter(keyBinding.begin(), keyBinding.end(), bindingRe);
+        std::sregex_iterator end;
+        for (; iter != end; ++iter) {
+            std::string fromStr = (*iter)[1];
+            std::string toStr = (*iter)[2];
+            try {
+                device.addKeyBinding(fromStr, toStr);
+            } catch (const std::exception& e) {
+                syslog(LOG_WARNING, "Failed to add key binding '%s->%s': %s",
+                       fromStr.c_str(), toStr.c_str(), e.what());
+            }
+        }
+    }
     syslog(LOG_INFO, "HotkeyManager initialized with deviceFile=%s, socketPath=%s",
         file.c_str(), socketPath.c_str());
 };
@@ -322,6 +349,7 @@ HotkeyManager& HotkeyManager::getInstance(
         config["deviceFile"],
         config["socketPath"],
         config["passwordHash"],
+        config["keyBinding"],
         grabDevice
     );
     static bool initialized = false;

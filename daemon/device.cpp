@@ -26,7 +26,7 @@ static bool isKeyboard(const std::string& path) {
     return result;
 }
 
-Device::Device(const std::string& file, bool grab) {
+Device::Device(const std::string& file, bool grab): keyBindings() {
     fd = open(file.c_str(), O_RDONLY);
     if (fd < 0) {
         throw std::runtime_error("Failed to open device file: " + file);
@@ -108,13 +108,18 @@ Event* Device::next() const {
             }
             return nullptr;
         }
+        key_t code = ev.code;
+        auto it = keyBindings.find(code);
+        if (it != keyBindings.end()) {
+            code = it->second;
+        }
         switch (ev.value) {
             case 1:
-                return new PressEvent(ev.code);
+                return new PressEvent(code);
             case 0:
-                return new ReleaseEvent(ev.code);
+                return new ReleaseEvent(code);
             case 2:
-                return new RepeatEvent(ev.code);
+                return new RepeatEvent(code);
             default:
                 return nullptr;
         }
@@ -155,6 +160,24 @@ void Device::passThroughEvent(const Event& ev) const {
 
 bool Device::isGrabbed() const {
     return uidev != nullptr;
+}
+
+void Device::addKeyBinding(key_t from, key_t to) {
+    if (from == to)
+        throw std::runtime_error("Cannot bind a key to itself");
+    if (keyBindings.find(from) != keyBindings.end())
+        throw std::runtime_error("Key binding for the source key already exists");
+    keyBindings[from] = to;
+}
+
+void Device::addKeyBinding(const std::string& from, const std::string& to) {
+    key_t fromKey = libevdev_event_code_from_name(EV_KEY, ("KEY_" + from).c_str());
+    if (fromKey == -1)
+        throw std::runtime_error("Invalid source key name for binding: " + from);
+    key_t toKey = libevdev_event_code_from_name(EV_KEY, ("KEY_" + to).c_str());
+    if (toKey == -1)
+        throw std::runtime_error("Invalid target key name for binding: " + to);
+    addKeyBinding(fromKey, toKey);
 }
 
 } // namespace hotkey_manager

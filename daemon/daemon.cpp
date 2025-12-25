@@ -86,6 +86,7 @@ int main(int argc, char* argv[]) {
                       << "    \"deviceFile\": \"/dev/input/event0\",\n"
                       << "    \"socketPath\": \"/tmp/hotkey-manager.sock\",\n"
                       << "    \"passwordHash\": \"$argon2id$v=19$m=65536,t=2,p=1$gVhSWbbAsC+mm2QfArc/xw$5fdVpc61mjx0xkbrMVi9YCXhIcl29h3fHvZkYO4TsIU\"\n"
+                      << "    \"keyBinding\": \"F12->DELETE, DELETE->F12\"\n"
                       << "}\n";
         }
         std::cerr << "Use `hotkey-manager-daemon -h` for help" << std::endl;

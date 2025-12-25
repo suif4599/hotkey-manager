@@ -38,6 +38,7 @@ class HotkeyManagerConfig {
     std::string deviceFile;
     std::string socketPath;
     std::string passwordHash;
+    std::string keyBinding;
     static bool isAsciiPath(const std::string& path);
     static bool isPlainText(const std::string& content);
     void setSecurePermissions() const;
@@ -81,6 +82,7 @@ class HotkeyManager {
         const std::string& file,
         const std::string& socketPath,
         const std::string& passwordHash,
+        const std::string& keyBinding,
         bool grabDevice
     );
     void closeSession(int clientFd);
