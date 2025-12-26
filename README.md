@@ -20,7 +20,7 @@
 Debian/Ubuntu example:
 
 ```bash
-sudo apt install build-essential cmake pkg-config libevdev-dev libsodium-dev python3 python3-dev python3-venv gzip
+sudo apt install build-essential cmake pkg-config libevdev-dev libsodium-dev python3 python3-dev python3-venv gzip bash-completion
 ```
 
 ## Build

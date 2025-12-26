@@ -89,6 +89,24 @@ else()
     endif()
 endif()
 
+# Bash completion
+set(BASH_COMPLETION_DIR "")
+set(_bash_completion_candidates
+    "/etc/bash_completion.d"
+    "/usr/local/etc/bash_completion.d"
+)
+foreach(_candidate IN LISTS _bash_completion_candidates)
+    if(EXISTS "${_candidate}")
+        set(BASH_COMPLETION_DIR "${_candidate}")
+        break()
+    endif()
+endforeach()
+if(BASH_COMPLETION_DIR STREQUAL "")
+    message(STATUS "bash_completion.d directory not found; bash completion will not be installed.")
+else()
+    message(STATUS "Bash completion will be installed to ${BASH_COMPLETION_DIR}")
+endif()
+
 
 # Source files
 FILE(GLOB DEAMON_SOURCES "daemon/*.cpp")
@@ -315,6 +333,13 @@ if(INSTALL_MANPAGES)
     )
     install(FILES "${MANPAGE_BUILD_DIR}/hotkey_manager.3.gz"
         DESTINATION "${MANPAGE_ROOT_DIR}/man3"
+    )
+endif()
+## Bash completion
+if(NOT BASH_COMPLETION_DIR STREQUAL "")
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/completions/hotkey-manager-daemon.bash"
+        DESTINATION "${BASH_COMPLETION_DIR}"
+        RENAME "hotkey-manager-daemon"
     )
 endif()
 
