@@ -14,8 +14,9 @@ class Device {
     struct libevdev_uinput* uidev;
     std::unordered_map<key_t, key_t> keyBindings;
     int fd;
+    EventManager& eventManager;
 public:
-    explicit Device(const std::string& file, bool grab = false);
+    explicit Device(const std::string& file, const EventManager& manager, bool grab = false);
     ~Device();
     static std::string autoDetectDeviceFile();
     Event* next() const;

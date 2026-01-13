@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <stdexcept>
 #include <vector>
+#include <syslog.h>
 
 using namespace hotkey_manager;
 
@@ -26,26 +27,32 @@ static bool isKeyboard(const std::string& path) {
     return result;
 }
 
-Device::Device(const std::string& file, bool grab): keyBindings() {
+Device::Device(const std::string& file, const EventManager& manager, bool grab)
+: keyBindings()
+, eventManager(const_cast<EventManager&>(manager)) {
     fd = open(file.c_str(), O_RDONLY);
     if (fd < 0) {
+        syslog(LOG_ERR, "Failed to open device file: %s", file.c_str());
         throw std::runtime_error("Failed to open device file: " + file);
     }
 
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags == -1 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
         close(fd);
+        syslog(LOG_ERR, "Failed to configure device file as non-blocking: %s", file.c_str());
         throw std::runtime_error("Failed to configure device file as non-blocking: " + file);
     }
 
     if (libevdev_new_from_fd(fd, &dev) < 0) {
         close(fd);
+        syslog(LOG_ERR, "Failed to initialize libevdev for file: %s", file.c_str());
         throw std::runtime_error("Failed to initialize libevdev for file: " + file);
     }
 
     if (!libevdev_has_event_type(dev, EV_KEY)) {
         libevdev_free(dev);
         close(fd);
+        syslog(LOG_ERR, "Device does not support key events: %s", file.c_str());
         throw std::runtime_error("Device does not support key events: " + file);
     }
 
@@ -63,6 +70,7 @@ Device::Device(const std::string& file, bool grab): keyBindings() {
     ) {
         libevdev_free(dev);
         close(fd);
+        syslog(LOG_ERR, "Failed to create uinput device from: %s", file.c_str());
         throw std::runtime_error("Failed to create uinput device from: " + file);
     }
 
@@ -70,12 +78,29 @@ Device::Device(const std::string& file, bool grab): keyBindings() {
         libevdev_uinput_destroy(uidev);
         libevdev_free(dev);
         close(fd);
+        syslog(LOG_ERR, "Failed to grab device: %s", file.c_str());
         throw std::runtime_error("Failed to grab device: " + file);
+    }
+
+    try {
+        manager.addFd(fd, EPOLLIN | EPOLLPRI);
+    } catch (const std::exception& e) {
+        syslog(LOG_ERR, "Failed to add device fd to EventManager: %s", e.what());
+        libevdev_grab(dev, LIBEVDEV_UNGRAB);
+        libevdev_uinput_destroy(uidev);
+        libevdev_free(dev);
+        close(fd);
+        throw;
     }
 };
 
 Device::~Device() {
     libevdev_free(dev);
+    if (uidev) {
+        libevdev_grab(dev, LIBEVDEV_UNGRAB);
+        libevdev_uinput_destroy(uidev);
+    }
+    eventManager.deleteFd(fd);
     close(fd);
 }
 
@@ -97,36 +122,44 @@ std::string Device::autoDetectDeviceFile() {
 
 Event* Device::next() const {
     struct input_event ev;
-    int rc = libevdev_next_event(dev, LIBEVDEV_READ_FLAG_NORMAL, &ev);
-    if (rc == LIBEVDEV_READ_STATUS_SUCCESS) {
-        if (ev.type != EV_KEY) {
-            if (!uidev)
-                return nullptr;
-            if (libevdev_uinput_write_event(uidev, ev.type, ev.code, ev.value) < 0 ||
-                libevdev_uinput_write_event(uidev, EV_SYN, SYN_REPORT, 0) < 0) {
-                throw std::runtime_error("Failed to write non-key event to uinput device");
+    while (true) {
+        int rc = libevdev_next_event(dev, LIBEVDEV_READ_FLAG_NORMAL, &ev);
+        if (rc == LIBEVDEV_READ_STATUS_SUCCESS) {
+            if (ev.type != EV_KEY) {
+                if (!uidev)
+                    return nullptr;
+                if (libevdev_uinput_write_event(uidev, ev.type, ev.code, ev.value) < 0 ||
+                    libevdev_uinput_write_event(uidev, EV_SYN, SYN_REPORT, 0) < 0) {
+                    throw std::runtime_error("Failed to write non-key event to uinput device");
+                }
+                continue; // Drain non-key events fully before returning to caller
             }
-            return nullptr;
+            key_t code = ev.code;
+            auto it = keyBindings.find(code);
+            if (it != keyBindings.end()) {
+                code = it->second;
+            }
+            switch (ev.value) {
+                case 1:
+                    return new PressEvent(code);
+                case 0:
+                    return new ReleaseEvent(code);
+                case 2:
+                    return new RepeatEvent(code);
+                default:
+                    return nullptr;
+            }
         }
-        key_t code = ev.code;
-        auto it = keyBindings.find(code);
-        if (it != keyBindings.end()) {
-            code = it->second;
+        if (rc == LIBEVDEV_READ_STATUS_SYNC) {
+            // Clear sync backlog so level-triggered epoll won't keep firing
+            while (rc == LIBEVDEV_READ_STATUS_SYNC)
+                rc = libevdev_next_event(dev, LIBEVDEV_READ_FLAG_SYNC, &ev);
+            continue;
         }
-        switch (ev.value) {
-            case 1:
-                return new PressEvent(code);
-            case 0:
-                return new ReleaseEvent(code);
-            case 2:
-                return new RepeatEvent(code);
-            default:
-                return nullptr;
-        }
+        if (rc == -EAGAIN)
+            return nullptr; // Fully drained
+        throw std::runtime_error("Error reading event from device");
     }
-    if (rc == LIBEVDEV_READ_STATUS_SYNC || rc == -EAGAIN)
-        return nullptr;
-    throw std::runtime_error("Error reading event from device");
 }
 
 void Device::passThroughEvent(const Event& ev) const {

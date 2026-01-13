@@ -247,9 +247,10 @@ HotkeyManager::HotkeyManager(
 ): keyboard(Keyboard::getInstance())
 , sessionMap()
 , hotkeyMap()
-, device(file, grabDevice)
+, eventManager()
+, device(file, eventManager, grabDevice)
 , grabDevice(grabDevice)
-, server(socketPath)
+, server(socketPath, eventManager)
 , encryptor()
 , commands()
 , deleteWaitlist()
@@ -368,18 +369,44 @@ HotkeyManager::~HotkeyManager() {
 
 void HotkeyManager::mainloop() {
     syslog(LOG_INFO, "HotkeyManager mainloop started.");
+    int64_t lastTime = 0;
     while (true) {
-        bool updated = false;
         // Delete sessions in waitlist
         for (int clientFd : deleteWaitlist) {
             server.deleteClient(clientFd);
             closeSession(clientFd);
-            updated = true;
         }
         deleteWaitlist.clear();
 
+        // Epoll wait
+        auto [events, n] = eventManager.wait(EPOLL_TIMEOUT_MS);
+        if (n == 0) continue;
+
+        // Handle new keyboard events
+        Event* ev;
+        while (ev = device.next()) {
+            keyboard.update(*ev);
+            bool suppressed = false;
+            for (auto& [cond, sessions] : hotkeyMap) {
+                if (!keyboard.check(*cond))
+                    continue;
+                syslog(LOG_DEBUG, "Hotkey triggered: %s", cond->to_string().c_str());
+                for (auto& [session, passThrough] : sessions) {
+                    server.sendResponse(
+                        session->getFd(),
+                        encryptor.encrypt("[HOTKEY]: " + cond->to_string(), session->getPublicKey())
+                    );
+                    if (!passThrough)
+                        suppressed = true;
+                }
+            }
+            if (grabDevice && !suppressed)
+                device.passThroughEvent(*ev);
+            delete ev;
+        }
+
         // Handle new UDS events
-        server.next();
+        server.next(events, n);
         // Accept
         ClientInfo* newClient = server.getNewClient();
         if (newClient) {
@@ -402,52 +429,36 @@ void HotkeyManager::mainloop() {
                     continue;
                 }
             }
+            try {
+                eventManager.addFd(newClient->getFd(), EPOLLIN | EPOLLRDHUP);
+            } catch (const std::exception& e) {
+                syslog(LOG_ERR, "Failed to add new clientFd=%d to EventManager: %s",
+                       newClient->getFd(), e.what());
+                server.sendResponse(
+                    newClient->getFd(),
+                    encryptor.encrypt("[Error]: Internal server error", "")
+                );
+                server.deleteClient(newClient->getFd());
+                it->second--;
+                continue;
+            }
             sessionMap[newClient->getFd()] = new Session(newClient);
             lastKeepAliveTimestamps[sessionMap[newClient->getFd()]] = getTimestampMs();
             syslog(LOG_INFO, "New client connected: %s", newClient->getProcessInfo().c_str());
-            updated = true;
         }
         // Receive
         auto [clientFd, command] = server.receiveCommand();
         if (command) {
             execute(clientFd, *command);
             delete command;
-            updated = true;
         }
         // Close
         int deletedClientFd = server.getDeletedClientFd();
         if (deletedClientFd != -1)
             closeSession(deletedClientFd);
 
-        // Handle new keyboard events
-        Event* ev = device.next();
-        if (!ev) {
-            if (!updated)
-                usleep(1000);
-            continue;
-        }
-        keyboard.update(*ev);
-        bool suppressed = false;
-        for (auto& [cond, sessions] : hotkeyMap) {
-            if (!keyboard.check(*cond))
-                continue;
-            syslog(LOG_DEBUG, "Hotkey triggered: %s", cond->to_string().c_str());
-            for (auto& [session, passThrough] : sessions) {
-                server.sendResponse(
-                    session->getFd(),
-                    encryptor.encrypt("[HOTKEY]: " + cond->to_string(), session->getPublicKey())
-                );
-                if (!passThrough)
-                    suppressed = true;
-            }
-            updated = true;
-        }
-        if (grabDevice && !suppressed)
-            device.passThroughEvent(*ev);
-        delete ev;
-
         // Delete sessions with timeout
-        int64_t lastTime = getTimestampMs() - KEEP_ALIVE_TIME;
+        lastTime = getTimestampMs() - KEEP_ALIVE_TIME;
         for (auto& [session, timestamp] : lastKeepAliveTimestamps) {
             if (timestamp > lastTime)
                 continue;
@@ -458,11 +469,7 @@ void HotkeyManager::mainloop() {
                 encryptor.encrypt("[Error]: KeepAlive timeout, closing session", session->getPublicKey())
             );
             deleteWaitlist.push_back(clientFd);
-            updated = true;
         }
-
-        if (!updated)
-            usleep(1000);
     }
 }
 

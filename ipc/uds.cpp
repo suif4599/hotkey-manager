@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <unistd.h>
 #include <syslog.h>
+#include <sys/epoll.h>
 
 using namespace hotkey_manager;
 
@@ -91,22 +92,25 @@ UnixDomainSocket::~UnixDomainSocket() {
     }
 }
 
-UnixDomainSocketServer::UnixDomainSocketServer(const std::string& path)
+UnixDomainSocketServer::UnixDomainSocketServer(const std::string& path, const EventManager& eventManager)
 : UnixDomainSocket(path)
 , clientMapping()
 , newClients()
-, deletedClients() {
+, deletedClients()
+, eventManager(const_cast<EventManager&>(eventManager)) {
     syslog(LOG_INFO, "Creating UnixDomainSocketServer with path: %s", socketPath.c_str());
     unlink(socketPath.c_str()); // Remove existing socket file
     if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
         close(fd);
         fd = -1;
+        syslog(LOG_ERR, "Failed to bind socket: %s", strerror(errno));
         throw std::runtime_error("Failed to bind socket");
     }
 
     if (listen(fd, BACK_LOG) == -1) {
         close(fd);
         fd = -1;
+        syslog(LOG_ERR, "Failed to listen on socket: %s", strerror(errno));
         throw std::runtime_error("Failed to listen on socket");
     }
 
@@ -114,12 +118,18 @@ UnixDomainSocketServer::UnixDomainSocketServer(const std::string& path)
     if (chmod(socketPath.c_str(), 0666) == -1) {
         close(fd);
         fd = -1;
+        syslog(LOG_ERR, "Failed to set socket permissions: %s", strerror(errno));
         throw std::runtime_error("Failed to set socket permissions");
     }
 
-    FD_ZERO(&master_fds);
-    FD_SET(fd, &master_fds); // Only the listening socket for now
-    max_fd = fd;
+    try {
+        eventManager.addFd(fd, EPOLLIN);
+    } catch (const std::exception& e) {
+        close(fd);
+        fd = -1;
+        syslog(LOG_ERR, "Failed to add listening socket to EventManager: %s", e.what());
+        throw;
+    }
 }
 
 UnixDomainSocketServer::~UnixDomainSocketServer() {
@@ -138,28 +148,14 @@ UnixDomainSocketServer::~UnixDomainSocketServer() {
     }
 }
 
-void UnixDomainSocketServer::next() {
+void UnixDomainSocketServer::next(struct epoll_event* events, int n) {
     static char buffer[1024] = {0};
-    syslog(LOG_DEBUG, "UnixDomainSocketServer waiting for events...");
-    struct timeval timeout {0, 0};
-    read_fds = master_fds;
-    int ready = select(max_fd + 1, &read_fds, nullptr, nullptr, &timeout);
-    if (ready == 0)
-        return; // No events
-    if (ready == -1) {
-        if (errno == EINTR) {
-            // Interrupt, the function should retry select, but mainloop will do it
-            syslog(LOG_NOTICE, "Select interrupted by signal");
-            return;
-        }
-        syslog(LOG_ERR, "Select error on socket: %s", strerror(errno));
-        return;
-    }
+    int fd;
+    syslog(LOG_DEBUG, "UnixDomainSocketServer updating...");
 
-    for (int i = 0; i <= max_fd; ++i) {
-        if (!FD_ISSET(i, &read_fds)) 
-            continue;
-        if (i == fd) { // New connection
+    for (int i = 0; i < n; ++i) {
+        fd = events[i].data.fd;
+        if (fd == this->fd) { // New connection
             syslog(LOG_DEBUG, "New connection on listening socket");
             int new_fd = accept(fd, nullptr, nullptr);
             if (new_fd == -1) {
@@ -191,28 +187,25 @@ void UnixDomainSocketServer::next() {
                                     std::to_string(cred.gid);
             clientMapping.emplace(new_fd, ClientInfo(new_fd, proc_info));
             newClients.push_back(&clientMapping.at(new_fd));
-
-            FD_SET(new_fd, &master_fds);
-            if (new_fd > max_fd)
-                max_fd = new_fd;
-        } else { // New message from existing connection
-            syslog(LOG_DEBUG, "Receiving data from clientFd=%d", i);
-            ssize_t bytes_received = recv(i, buffer, sizeof(buffer) - 1, 0);
+        } else if (clientMapping.find(fd) != clientMapping.end()) { // New message from existing connection
+            syslog(LOG_DEBUG, "Receiving data from clientFd=%d", fd);
+            ssize_t bytes_received = recv(fd, buffer, sizeof(buffer) - 1, 0);
             if (bytes_received > 0) {
                 buffer[bytes_received] = '\0';
-                clientMapping[i].append(std::string(buffer, bytes_received));
+                clientMapping[fd].append(std::string(buffer, bytes_received));
             } else if (bytes_received == 0) {
-                deleteClient(i);
-                deletedClients.push(i);
+                deleteClient(fd);
+                deletedClients.push(fd);
             } else {
                 if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
                     continue;
-                deleteClient(i);
-                deletedClients.push(i);
+                deleteClient(fd);
+                deletedClients.push(fd);
             }
         }
     }
 }
+
 void UnixDomainSocketServer::deleteClient(int clientFd) {
     syslog(LOG_DEBUG, "Deleting clientFd=%d", clientFd);
     ClientInfo& client = clientMapping[clientFd];
@@ -222,15 +215,8 @@ void UnixDomainSocketServer::deleteClient(int clientFd) {
         syslog(LOG_NOTICE, "The deleted client was still in newClients queue, clientFd=%d", clientFd);
     }
     close(clientFd);
-    FD_CLR(clientFd, &master_fds);
+    eventManager.deleteFd(clientFd);
     clientMapping.erase(clientFd);
-    if (clientFd == max_fd) {
-        max_fd = fd;
-        for (const auto& [fd_key, _] : clientMapping) {
-            if (fd_key > max_fd)
-                max_fd = fd_key;
-        }
-    }
 }
 
 void UnixDomainSocketServer::sendResponse(int clientFd, const std::string& response) {

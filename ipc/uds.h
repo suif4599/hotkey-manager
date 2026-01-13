@@ -8,6 +8,7 @@
 #include <queue>
 #include <vector>
 #include <iostream>
+#include "daemon/event.h"
 
 namespace hotkey_manager {
 
@@ -47,16 +48,14 @@ public:
 };
 
 class UnixDomainSocketServer : public UnixDomainSocket {
-    fd_set read_fds;
-    fd_set master_fds;
-    int max_fd;
     std::map<int, ClientInfo> clientMapping;
     std::vector<ClientInfo*> newClients;
     std::queue<int> deletedClients;
+    EventManager& eventManager;
 public:
-    explicit UnixDomainSocketServer(const std::string& path);
+    explicit UnixDomainSocketServer(const std::string& path, const EventManager& eventManager);
     ~UnixDomainSocketServer() override;
-    void next();
+    void next(struct epoll_event* events, int n);
     void deleteClient(int clientFd);
     void sendResponse(int clientFd, const std::string& response);
     std::pair<int, std::string*> receiveCommand();

@@ -61,6 +61,7 @@ class HotkeyManager {
     Keyboard& keyboard;
     std::map<int, Session*> sessionMap; // Maintain life cycle of Session*
     std::unordered_map<Condition*, std::vector<std::pair<Session*, bool>>> hotkeyMap; // Borrow Session*, Maintain Condition*
+    EventManager eventManager;
     Device device;
     bool grabDevice;
     UnixDomainSocketServer server;
