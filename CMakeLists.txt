@@ -11,9 +11,17 @@ option(ENABLE_DAEMON "Enable building hotkey-manager-daemon service" ON)
 option(START_DAEMON "Enable and start hotkey-manager-daemon service after installation" ON)
 ## Grab Device
 option(GRAB_DEVICE "Have the daemon grab the input device to prevent other processes from receiving events" ON)
+## DUMPABLE
+option(ALLOW_DUMP "Allow the daemon to be dumpable for debugging purposes" OFF)
 
 
 # Condition Check
+## Check if ALLOW_DUMP is set on debug builds
+if(ALLOW_DUMP)
+    if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+        message(FATAL_ERROR "ALLOW_DUMP can only be enabled for Debug builds.")
+    endif()
+endif()
 ## Check if running on Linux
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(FATAL_ERROR "This project can only be built on Linux.")
@@ -137,7 +145,7 @@ target_include_directories(hotkey-manager-daemon PRIVATE ${LIBEVDEV_INCLUDE_DIRS
 target_include_directories(hotkey-manager-daemon PRIVATE ${LIBSODIUM_INCLUDE_DIRS})
 target_link_libraries(hotkey-manager-daemon PRIVATE ${LIBEVDEV_LIBRARIES})
 target_link_libraries(hotkey-manager-daemon PRIVATE ${LIBSODIUM_LIBRARIES})
-if (GRAB_DEVICE)
+if(GRAB_DEVICE)
     target_compile_definitions(hotkey-manager-daemon PRIVATE ENABLE_GRAB_DEVICE)
 endif()
 ## Library
@@ -153,8 +161,11 @@ target_link_libraries(hotkey-manager-client PRIVATE ${LIBSODIUM_LIBRARIES})
 set_target_properties(hotkey-manager-client PROPERTIES
     PUBLIC_HEADER client/interface.h
 )
+if(ALLOW_DUMP)
+    target_compile_definitions(hotkey-manager-client PRIVATE ALLOW_DUMP)
+endif()
 ## Python Module
-if (BUILD_PYTHON_MODULE)
+if(BUILD_PYTHON_MODULE)
     # Find Python
     if(PYTHON_EXECUTABLE)
         if(PYTHON_VERSION)
@@ -187,6 +198,9 @@ if (BUILD_PYTHON_MODULE)
     target_link_libraries(hotkey-manager-python PRIVATE ${LIBSODIUM_LIBRARIES})
     target_link_libraries(hotkey-manager-python PRIVATE ${Python_LIBRARIES})
     target_compile_definitions(hotkey-manager-python PRIVATE)
+    if (ALLOW_DUMP)
+        target_compile_definitions(hotkey-manager-python PRIVATE ALLOW_DUMP)
+    endif()
     ## Must statically link libstdc++
     target_link_libraries(hotkey-manager-python PRIVATE -Wl,-Bstatic -lstdc++ -Wl,-Bdynamic)
     # Build python module structure

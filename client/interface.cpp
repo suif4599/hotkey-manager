@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <regex>
 #include <algorithm>
+#include <sys/prctl.h>
 
 using namespace hotkey_manager;
 
@@ -15,6 +16,11 @@ HotkeyInterface::HotkeyInterface(const std::string& socketPath, int64_t timeoutM
 , client(socketPath, timeoutMs)
 , encryptor() {
     std::lock_guard<std::recursive_mutex> lock(interfaceMutex);
+    #ifndef ALLOW_DUMP
+    if (prctl(PR_SET_DUMPABLE, 0) != 0) {
+        throw std::runtime_error("Failed to disable core dumps for HotkeyInterface process");
+    }
+    #endif
     std::string* resp = client.sendCommand("getPublicKey");
     if (!resp)
         throw std::runtime_error("Failed to receive response for command getPublicKey");

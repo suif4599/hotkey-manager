@@ -35,8 +35,11 @@ cmake --build build
 Key build options:
 
 - `-DBUILD_PYTHON_MODULE=ON` to build the Python wheel
+- `-DPYTHON_EXECUTABLE=""` to specify the python executable to build the module, empty for auto
 - `-DENABLE_DAEMON=OFF` to build without the systemd unit
 - `-DSTART_DAEMON=OFF` to prevent the installer from immediately starting the service
+- `-DGRAB_DEVICE=ON` to exclusively register a hotkey combination
+- `-DALLOW_DUMP=OFF` to leave `PR_SET_DUMPABLE` default for client
 
 `build/` will contain:
 
