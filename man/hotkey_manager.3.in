@@ -77,7 +77,7 @@ Typical client usage follows a fixed sequence:
 .IP 1. 3
 Construct
 .B HotkeyInterface
-with the socket path exported by the daemon installation.
+with the abstract socket name exported by the daemon installation.
 .IP 2. 3
 Call
 .BR authenticate ()
@@ -105,7 +105,7 @@ The library exposes exactly one public class.
 
 .SS hotkey_manager::HotkeyInterface
 .TP
-.BI "HotkeyInterface(const std::string& " socketPath ", int64_t " timeoutMs " = 5000)"
+.BI "HotkeyInterface(const std::string& " socketName ", int64_t " timeoutMs " = 5000)"
 Creates a session, retrieves the daemon public key, registers the client public
 key, and sets the per\-request timeout used when waiting for responses.  Throws
 .B std::runtime_error
@@ -150,7 +150,7 @@ returns false or an exception occurs.
 Returns a const reference to the internal callback registry for inspection.
 
 .PP
-All member functions are thread\-safe through an internal recursive mutex.  The
+All member functions are thread-safe through an internal recursive mutex.  The
 class may be destroyed from any thread; destruction attempts to close the
 session gracefully.
 
@@ -158,7 +158,7 @@ session gracefully.
 The library reports failures via C++ exceptions.  Common messages include:
 .TP
 .B "Failed to connect to server socket"
-Socket path is incorrect or the daemon is not running.
+Socket name is incorrect or the daemon is not running.
 .TP
 .B "Server socket is tampered (not owned by root)"
 Peer credential check failed; the client aborts to avoid talking to an
@@ -191,7 +191,7 @@ g++ main.cpp -I@CMAKE_INSTALL_FULL_INCLUDEDIR@ -L@CMAKE_INSTALL_FULL_LIBDIR@ \
 using hotkey_manager::HotkeyInterface;
 
 int main() {
-    HotkeyInterface iface{"/tmp/hotkey-manager.sock"};
+    HotkeyInterface iface{"hotkey-manager-ipc"};
     iface.authenticate("secret-password");
 
     iface.registerHotkey("Double(ESC)", [] {

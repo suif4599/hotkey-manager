@@ -51,6 +51,19 @@ int main(int argc, char* argv[]) {
             }
             return 0;
         }
+        if (command == "reset" && argc == 2) {
+            if (getuid() != 0) {
+                std::cerr << "Error: Resetting the config file requires root privileges." << std::endl;
+                return 1;
+            }
+            try {
+                HotkeyManagerConfig::resetToDefault(CONFIG_FILE_PATH);
+            } catch (const std::exception& e) {
+                std::cerr << "Error resetting config: " << e.what() << std::endl;
+                return 1;
+            }
+            return 0;
+        }
         if (command == "set" && argc == 4) {
             if (getuid() != 0) {
                 std::cerr << "Error: Modifying the config file requires root privileges." << std::endl;
@@ -79,12 +92,13 @@ int main(int argc, char* argv[]) {
                       << "    hotkey-manager-daemon                       Start the daemon (Require ROOT)\n"
                       << "    hotkey-manager-daemon hash <password>       Generate password hash for given password\n"
                       << "    hotkey-manager-daemon keynames              List all available key names\n"
-                      << "    hotkey-manager-daemon set <field> <value>   Modify the config file (Require ROOT)\n\n"
+                      << "    hotkey-manager-daemon set <field> <value>   Modify the config file (Require ROOT)\n"
+                      << "    hotkey-manager-daemon reset                 Reset config file to defaults (Require ROOT)\n\n"
                       << "Config file is located at `" << CONFIG_FILE_PATH << "`\n"
                       << "Example config file content:\n"
                       << "{\n"
                       << "    \"deviceFile\": \"/dev/input/event0\",\n"
-                      << "    \"socketPath\": \"/tmp/hotkey-manager.sock\",\n"
+                      << "    \"socketName\": \"" << DEFAULT_SOCKET_NAME << "\",\n"
                       << "    \"passwordHash\": \"$argon2id$v=19$m=65536,t=2,p=1$gVhSWbbAsC+mm2QfArc/xw$5fdVpc61mjx0xkbrMVi9YCXhIcl29h3fHvZkYO4TsIU\"\n"
                       << "    \"keyBinding\": \"F12->DELETE, DELETE->F12\"\n"
                       << "}\n";

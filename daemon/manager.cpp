@@ -19,6 +19,66 @@ using namespace hotkey_manager;
 
 namespace hotkey_manager {
 
+static const char* DEFAULT_PASSWORD_HASH_STR = "$argon2id$v=19$m=65536,t=2,p=1$gVhSWbbAsC+mm2QfArc/xw$5fdVpc61mjx0xkbrMVi9YCXhIcl29h3fHvZkYO4TsIU";
+
+static void ensureParentDirExists(const std::filesystem::path& parent) {
+    if (parent.empty())
+        return;
+    std::error_code ec;
+    auto status = std::filesystem::symlink_status(parent, ec);
+    if (ec)
+        throw std::runtime_error("Failed to inspect config parent directory: " + ec.message());
+    if (!std::filesystem::exists(status)) {
+        if (!std::filesystem::create_directories(parent, ec))
+            throw std::runtime_error("Failed to create config parent directory: " + parent.string());
+        if (ec)
+            throw std::runtime_error("Failed to create config parent directory: " + ec.message());
+    } else if (!std::filesystem::is_directory(status)) {
+        throw std::runtime_error("Config parent path is not a directory: " + parent.string());
+    }
+}
+
+static std::string defaultConfigPayload() {
+    return std::string("{\n")
+        + "    \"deviceFile\": \"auto\",\n"
+        + "    \"socketName\": \"" DEFAULT_SOCKET_NAME "\",\n"
+        + "    \"passwordHash\": \"" + std::string(DEFAULT_PASSWORD_HASH_STR) + "\",\n"
+        + "    \"keyBinding\": \"\"\n"
+        + "}\n"; // default password: 123456
+}
+
+static void writeDefaultConfigFile(const std::string& filePath, bool overwrite) {
+    namespace fs = std::filesystem;
+    fs::path path(filePath);
+    ensureParentDirExists(path.parent_path());
+
+    int flags = O_WRONLY | O_CREAT | O_NOFOLLOW;
+    flags |= overwrite ? O_TRUNC : O_EXCL;
+    int fd = open(filePath.c_str(), flags, S_IRUSR | S_IWUSR);
+    if (fd == -1) {
+        if (!overwrite && errno == EEXIST)
+            throw std::runtime_error("Config file already exists: " + filePath);
+        throw std::runtime_error(
+            "Failed to open config file '" + filePath + "': " + std::strerror(errno)
+        );
+    }
+
+    std::string payload = defaultConfigPayload();
+    ssize_t written = ::write(fd, payload.data(), payload.size());
+    if (written < 0 || static_cast<std::size_t>(written) != payload.size()) {
+        close(fd);
+        throw std::runtime_error(
+            "Failed to write config file '" + filePath + "': " + std::strerror(errno)
+        );
+    }
+    close(fd);
+    if (chmod(filePath.c_str(), S_IRUSR | S_IWUSR) == -1)
+        throw std::runtime_error(
+            "Failed to set config permissions for '" + filePath + "': " + std::strerror(errno)
+        );
+    syslog(LOG_INFO, "Default config written to: %s", filePath.c_str());
+}
+
 static auto findHotkeyEntry(
     std::unordered_map<Condition*, std::vector<std::pair<Session*, bool>>>& map,
     const Condition& target
@@ -32,13 +92,8 @@ static auto findHotkeyEntry(
     );
 }
 
-static const std::regex configRe {
-    "^\\s*\\{"
-    "\\s*[\"'](\\w+)[\"']: *[\"']([\\s\\S]+?)[\"'],\\s*"
-    "\\s*[\"'](\\w+)[\"']: *[\"']([\\s\\S]+?)[\"'],\\s*"
-    "\\s*[\"'](\\w+)[\"']: *[\"']([\\s\\S]+?)[\"'],\\s*"
-    "\\s*[\"'](\\w+)[\"']: *[\"']([\\s\\S]+?)[\"'],?\\s*"
-    "\\}\\s*$"
+static const std::regex kvRe {
+    "[\"'](\\w+)[\"']\\s*:\\s*[\"']([\\s\\S]*?)[\"']"
 };
 
 bool HotkeyManagerConfig::isAsciiPath(const std::string& path) {
@@ -68,72 +123,33 @@ void HotkeyManagerConfig::parseConfig(const std::string& content) {
     if (!isPlainText(content))
         throw std::runtime_error("Config file contains non-text data: " + configFile);
 
-    std::smatch match;
-    if (!std::regex_match(content, match, configRe))
-        throw std::runtime_error("Invalid config file format");
-
-    for (size_t i = 1; i < match.size(); i += 2) {
-        std::string key = match[i];
-        std::string value = match[i + 1];
-        if (key == "deviceFile") {
-            if (value == "auto")
-                deviceFile = Device::autoDetectDeviceFile();
-            else
-                deviceFile = value;
-        } else if (key == "socketPath")
-            socketPath = value;
-        else if (key == "passwordHash")
-            passwordHash = value;
-        else if (key == "keyBinding")
-            keyBinding = value;
-        else
-            throw std::runtime_error("Unknown config key: " + key);
+    std::unordered_map<std::string, std::string> kv;
+    for (std::sregex_iterator it(content.begin(), content.end(), kvRe), end; it != end; ++it) {
+        kv[(*it)[1]] = (*it)[2];
     }
+
+    auto getRequired = [&](const char* key) -> const std::string& {
+        auto it = kv.find(key);
+        if (it == kv.end())
+            throw std::runtime_error(std::string("Missing config key: ") + key);
+        return it->second;
+    };
+
+    const std::string& deviceFileValue = getRequired("deviceFile");
+    if (deviceFileValue == "auto")
+        deviceFile = Device::autoDetectDeviceFile();
+    else
+        deviceFile = deviceFileValue;
+
+    socketName = getRequired("socketName");
+    passwordHash = getRequired("passwordHash");
+    keyBinding = getRequired("keyBinding");
 }
 
 void HotkeyManagerConfig::createDefaultConfig() {
     if (!isAsciiPath(configFile))
         throw std::runtime_error("Config file path must use printable ASCII characters");
-    namespace fs = std::filesystem;
-    fs::path path(configFile);
-    fs::path parent = path.parent_path();
-    if (!parent.empty()) {
-        std::error_code ec;
-        if (!fs::exists(parent, ec))
-            throw std::runtime_error("Config parent directory does not exist: " + parent.string());
-        if (ec)
-            throw std::runtime_error("Failed to inspect config parent directory: " + ec.message());
-    }
-
-    std::error_code ec;
-    if (fs::exists(path, ec))
-        throw std::runtime_error("Config file already exists: " + configFile);
-    if (ec)
-        throw std::runtime_error("Failed to inspect config file path: " + ec.message());
-
-    int fd = open(configFile.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, S_IRUSR | S_IWUSR);
-    if (fd == -1)
-        throw std::runtime_error(
-            "Failed to create default config file '" + configFile + "': " + std::strerror(errno)
-        );
-
-    std::string payload {
-        "{\n"
-        "    \"deviceFile\": \"auto\",\n"
-        "    \"socketPath\": \"/tmp/hotkey-manager.sock\",\n"
-        "    \"passwordHash\": \"$argon2id$v=19$m=65536,t=2,p=1$gVhSWbbAsC+mm2QfArc/xw$5fdVpc61mjx0xkbrMVi9YCXhIcl29h3fHvZkYO4TsIU\",\n"
-        "    \"keyBinding\": \"\"\n"
-        "}\n"
-    }; // 123456
-    ssize_t written = ::write(fd, payload.data(), payload.size());
-    if (written < 0 || static_cast<std::size_t>(written) != payload.size()) {
-        close(fd);
-        throw std::runtime_error(
-            "Failed to write default config file '" + configFile + "': " + std::strerror(errno)
-        );
-    }
-    close(fd);
-    setSecurePermissions();
+    writeDefaultConfigFile(configFile, false);
     syslog(LOG_INFO, "Created default config file at: %s", configFile.c_str());
 }
 
@@ -145,8 +161,13 @@ HotkeyManagerConfig::HotkeyManagerConfig(const std::string& filePath)
     namespace fs = std::filesystem;
     std::error_code ec;
     fs::file_status status = fs::symlink_status(configFile, ec);
-    if (ec)
-        throw std::runtime_error("Failed to inspect config file '" + configFile + "': " + ec.message());
+    if (ec) {
+        // Likely missing parent directory; attempt to create default config
+        createDefaultConfig();
+        status = fs::symlink_status(configFile, ec);
+        if (ec)
+            throw std::runtime_error("Failed to inspect config file '" + configFile + "' after creation: " + ec.message());
+    }
 
     if (!fs::exists(status)) {
         createDefaultConfig();
@@ -169,9 +190,9 @@ HotkeyManagerConfig::HotkeyManagerConfig(const std::string& filePath)
 
     parseConfig(content);
     setSecurePermissions();
-    syslog(LOG_INFO, "Using config file: %s", configFile.c_str());
-    syslog(LOG_INFO, "Config loaded: deviceFile=%s, socketPath=%s, passwordHash=%s",
-            deviceFile.c_str(), socketPath.c_str(), passwordHash.c_str());
+        syslog(LOG_INFO, "Using config file: %s", configFile.c_str());
+        syslog(LOG_INFO, "Config loaded: deviceFile=%s, socketName=%s, passwordHash=%s",
+            deviceFile.c_str(), socketName.c_str(), passwordHash.c_str());
 }
 
 HotkeyManagerConfig& HotkeyManagerConfig::getInstance(const std::string& configFile) {
@@ -187,8 +208,8 @@ std::string& HotkeyManagerConfig::operator[](const std::string& key) {
     // Setitem
     if (key == "deviceFile")
         return deviceFile;
-    else if (key == "socketPath")
-        return socketPath;
+    else if (key == "socketName")
+        return socketName;
     else if (key == "passwordHash")
         return passwordHash;
     else if (key == "keyBinding")
@@ -201,8 +222,8 @@ const std::string& HotkeyManagerConfig::operator[](const std::string& key) const
     // Getitem
     if (key == "deviceFile")
         return deviceFile;
-    else if (key == "socketPath")
-        return socketPath;
+    else if (key == "socketName")
+        return socketName;
     else if (key == "passwordHash")
         return passwordHash;
     else if (key == "keyBinding")
@@ -227,7 +248,7 @@ void HotkeyManagerConfig::save() const {
         throw std::runtime_error("Failed to open config file for writing");
     file << "{\n"
             << "    \"deviceFile\": \"" << deviceFile << "\",\n"
-            << "    \"socketPath\": \"" << socketPath << "\",\n"
+            << "    \"socketName\": \"" << socketName << "\",\n"
             << "    \"passwordHash\": \"" << passwordHash << "\",\n"
             << "    \"keyBinding\": \"" << keyBinding << "\"\n"
             << "}\n";
@@ -238,9 +259,14 @@ void HotkeyManagerConfig::save() const {
     syslog(LOG_INFO, "Config saved to file: %s", configFile.c_str());
 }
 
+void HotkeyManagerConfig::resetToDefault(const std::string& configFilePath) {
+    writeDefaultConfigFile(configFilePath, true);
+    syslog(LOG_INFO, "Config reset to defaults at: %s", configFilePath.c_str());
+}
+
 HotkeyManager::HotkeyManager(
     const std::string& file,
-    const std::string& socketPath,
+    const std::string& socketName,
     const std::string& passwordHash,
     const std::string& keyBinding,
     bool grabDevice
@@ -250,7 +276,7 @@ HotkeyManager::HotkeyManager(
 , eventManager()
 , device(file, eventManager, grabDevice)
 , grabDevice(grabDevice)
-, server(socketPath, eventManager)
+, server(socketName, eventManager)
 , encryptor()
 , commands()
 , deleteWaitlist()
@@ -295,8 +321,8 @@ HotkeyManager::HotkeyManager(
             }
         }
     }
-    syslog(LOG_INFO, "HotkeyManager initialized with deviceFile=%s, socketPath=%s",
-        file.c_str(), socketPath.c_str());
+    syslog(LOG_INFO, "HotkeyManager initialized with deviceFile=%s, socketName=%s",
+        file.c_str(), socketName.c_str());
 };
 
 void HotkeyManager::closeSession(int clientFd) {
@@ -348,7 +374,7 @@ HotkeyManager& HotkeyManager::getInstance(
     static HotkeyManagerConfig& config = HotkeyManagerConfig::getInstance(configFile);
     static HotkeyManager instance(
         config["deviceFile"],
-        config["socketPath"],
+        config["socketName"],
         config["passwordHash"],
         config["keyBinding"],
         grabDevice

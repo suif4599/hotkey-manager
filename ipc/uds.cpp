@@ -5,6 +5,7 @@
 #include <cerrno>
 #include <cstring>
 #include <chrono>
+#include <cstddef>
 #include <fcntl.h>
 #include <stdexcept>
 #include <sys/socket.h>
@@ -24,6 +25,23 @@ static void setNonBlocking(int socket_fd) {
         throw std::runtime_error("Failed to get socket flags");
     if (fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK) == -1)
         throw std::runtime_error("Failed to set socket to non-blocking");
+}
+
+static void initAbstractAddress(
+    const std::string& socketName,
+    sockaddr_un& addr,
+    socklen_t& addrLen
+) {
+    if (socketName.empty())
+        throw std::runtime_error("Socket name must not be empty");
+    if (socketName.size() >= sizeof(addr.sun_path))
+        throw std::runtime_error("Socket name is too long for AF_UNIX abstract namespace");
+
+    std::memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    addr.sun_path[0] = '\0';
+    std::memcpy(addr.sun_path + 1, socketName.c_str(), socketName.size());
+    addrLen = static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + 1 + socketName.size());
 }
 
 
@@ -72,17 +90,18 @@ std::ostream& operator<<(std::ostream& os, const ClientInfo& info) {
     return os;
 }
 
-UnixDomainSocket::UnixDomainSocket(const std::string& path)
+UnixDomainSocket::UnixDomainSocket(const std::string& name)
 : fd(-1)
 , addr{}
-, socketPath(path) {
-    syslog(LOG_INFO, "Creating UnixDomainSocket with path: %s", socketPath.c_str());
+, addrLen(0)
+, socketName(name)
+, displayName("@" + name) {
+    syslog(LOG_INFO, "Creating UnixDomainSocket with name: %s", displayName.c_str());
     fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd == -1)
         throw std::runtime_error("Failed to create socket");
 
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, socketPath.c_str(), sizeof(addr.sun_path) - 1);
+    initAbstractAddress(socketName, addr, addrLen);
 }
 
 UnixDomainSocket::~UnixDomainSocket() {
@@ -92,15 +111,14 @@ UnixDomainSocket::~UnixDomainSocket() {
     }
 }
 
-UnixDomainSocketServer::UnixDomainSocketServer(const std::string& path, const EventManager& eventManager)
-: UnixDomainSocket(path)
+UnixDomainSocketServer::UnixDomainSocketServer(const std::string& name, const EventManager& eventManager)
+: UnixDomainSocket(name)
 , clientMapping()
 , newClients()
 , deletedClients()
 , eventManager(const_cast<EventManager&>(eventManager)) {
-    syslog(LOG_INFO, "Creating UnixDomainSocketServer with path: %s", socketPath.c_str());
-    unlink(socketPath.c_str()); // Remove existing socket file
-    if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+    syslog(LOG_INFO, "Creating UnixDomainSocketServer with name: %s", displayName.c_str());
+    if (bind(fd, (struct sockaddr*)&addr, addrLen) == -1) {
         close(fd);
         fd = -1;
         syslog(LOG_ERR, "Failed to bind socket: %s", strerror(errno));
@@ -115,13 +133,6 @@ UnixDomainSocketServer::UnixDomainSocketServer(const std::string& path, const Ev
     }
 
     setNonBlocking(fd);
-    if (chmod(socketPath.c_str(), 0666) == -1) {
-        close(fd);
-        fd = -1;
-        syslog(LOG_ERR, "Failed to set socket permissions: %s", strerror(errno));
-        throw std::runtime_error("Failed to set socket permissions");
-    }
-
     try {
         eventManager.addFd(fd, EPOLLIN);
     } catch (const std::exception& e) {
@@ -133,7 +144,7 @@ UnixDomainSocketServer::UnixDomainSocketServer(const std::string& path, const Ev
 }
 
 UnixDomainSocketServer::~UnixDomainSocketServer() {
-    syslog(LOG_INFO, "Destroying UnixDomainSocketServer with path: %s", socketPath.c_str());
+    syslog(LOG_INFO, "Destroying UnixDomainSocketServer with name: %s", displayName.c_str());
     for (const auto& [clientFd, _] : clientMapping) {
         if (clientFd >= 0)
             close(clientFd);
@@ -142,10 +153,6 @@ UnixDomainSocketServer::~UnixDomainSocketServer() {
     newClients.clear();
     deletedClients = std::queue<int>();
 
-    if (!socketPath.empty()) {
-        if (unlink(socketPath.c_str()) == -1 && errno != ENOENT)
-            syslog(LOG_WARNING, "Failed to unlink socket file %s: %s", socketPath.c_str(), strerror(errno));
-    }
 }
 
 void UnixDomainSocketServer::next(struct epoll_event* events, int n) {
@@ -208,6 +215,7 @@ void UnixDomainSocketServer::next(struct epoll_event* events, int n) {
 
 void UnixDomainSocketServer::deleteClient(int clientFd) {
     syslog(LOG_DEBUG, "Deleting clientFd=%d", clientFd);
+    eventManager.deleteFd(clientFd);
     ClientInfo& client = clientMapping[clientFd];
     auto it = std::find(newClients.begin(), newClients.end(), &client);
     if (it != newClients.end()) {
@@ -215,7 +223,6 @@ void UnixDomainSocketServer::deleteClient(int clientFd) {
         syslog(LOG_NOTICE, "The deleted client was still in newClients queue, clientFd=%d", clientFd);
     }
     close(clientFd);
-    eventManager.deleteFd(clientFd);
     clientMapping.erase(clientFd);
 }
 
@@ -279,15 +286,15 @@ int UnixDomainSocketServer::getDeletedClientFd() {
 }
 
 UnixDomainSocketClient::UnixDomainSocketClient(
-    const std::string& path,
+    const std::string& name,
     int64_t timeoutMs
-): UnixDomainSocket(path)
+): UnixDomainSocket(name)
 , buffer()
 , timeoutMs(timeoutMs) {
-    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+    if (connect(fd, (struct sockaddr*)&addr, addrLen) == -1) {
         close(fd);
         fd = -1;
-        throw std::runtime_error("Failed to connect to server socket");
+        throw std::runtime_error("Failed to connect to server socket: " + displayName);
     }
 
     struct ucred cred;

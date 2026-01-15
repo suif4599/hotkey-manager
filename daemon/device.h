@@ -2,6 +2,7 @@
 #define DEAMON_DEVICE_H
 
 #include "daemon/event.h"
+#include "ipc/event.h"
 #include <libevdev-1.0/libevdev/libevdev.h>
 #include <libevdev-1.0/libevdev/libevdev-uinput.h>
 #include <string>

@@ -21,7 +21,7 @@ typedef struct {
     HotkeyInterface* hotkeyInterface;
     std::map<std::string, std::vector<PyObject*>>* registeredCallbacks;
     uint64_t callbackCount;
-    PyObject* socketPath;
+    PyObject* socketName;
     PyObject* timeoutMs;
 } HotkeyManagerInterfaceObject;
 
@@ -35,7 +35,7 @@ extern "C" PyObject* mainloop(HotkeyManagerInterfaceObject* self, PyObject* args
 
 extern const char* HotkeyManagerModule_docstring;
 extern const char* HotkeyManagerInterface_docstring;
-extern const char* HotkeyManagerInterface_socketPath_docstring;
+extern const char* HotkeyManagerInterface_socketName_docstring;
 extern const char* HotkeyManagerInterface_timeoutMs_docstring;
 extern const char* HotKeyManagerInterface_init_docstring;
 extern const char* HotkeyManagerInterface_authenticate_docstring;

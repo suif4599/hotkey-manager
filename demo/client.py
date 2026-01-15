@@ -20,10 +20,10 @@ def schedule_sigint(delay_seconds: int) -> None:
 
 
 def main() -> None:
-    manager = HotkeyManagerInterface("/tmp/hotkey-manager.sock")
+    manager = HotkeyManagerInterface()
     print("Connected to hotkey-manager daemon.")
 
-    manager.authenticate("123456")
+    manager.authenticate("pass")
     print("Authentication succeeded.")
 
     # Register the primary hotkey that will stay active for the entire demo

@@ -31,7 +31,8 @@ privileges in order to read from
 files.
 
 When started without subcommands the daemon loads its configuration, opens the
-configured input device, and listens on the configured socket path.  Clients
+configured input device, and listens on the configured socket name (AF_UNIX
+abstract namespace).  Clients
 connect through the companion C++ or Python libraries, exchanging messages over
 a libsodium\-backed authenticated channel.  The daemon enforces per\-process
 connection limits, validates keep-alive heartbeats, and broadcasts hotkey hits
@@ -58,13 +59,19 @@ appears per line.
 Updates the configuration file in place.  This subcommand requires root
 privileges.  Supported fields are
 .BR deviceFile ,
-.BR socketPath ,
+.BR socketName ,
 and
 .BR passwordHash ,
 and
 .BR keyBinding .
 The daemon is not automatically restarted; reload manually via systemd after
 editing.
+.TP
+.B reset
+Rewrites the configuration file to default values (requires root). Existing
+content is replaced with the same defaults used on first start: deviceFile
+`auto`, socketName `hotkey-manager-ipc`, the bundled Argon2 password hash, and
+an empty keyBinding. No backup is created.
 .TP
 .B --help
 Displays a usage summary and a sample configuration block.
@@ -87,7 +94,7 @@ permissions (0600) containing:
 .nf
 {
     "deviceFile": "auto",
-    "socketPath": "/tmp/hotkey-manager.sock",
+    "socketName": "hotkey-manager-ipc",
     "passwordHash": "$argon2id$...",
     "keyBinding": ""
 }
@@ -102,9 +109,10 @@ specifies the event device to monitor.  The special value
 performs simple auto\-detection; an error is raised if zero or multiple
 candidates match.
 .IP \(bu 2
-.B socketPath
-is the Unix domain socket exposed to clients.  The daemon unlinks any existing
-socket, binds, and chmods the new path to 0666.
+.B socketName
+is the AF_UNIX abstract socket name exposed to clients.  The daemon binds to
+the null-prefixed name (no filesystem entry is created) and relies on
+SO_PEERCRED checks to verify peers.
 .IP \(bu 2
 .B passwordHash
 stores the Argon2id hash clients must satisfy during authentication.
@@ -171,10 +179,15 @@ Enumerate available key symbols:
 hotkey-manager-daemon keynames | less
 .EE
 .IP 3. 4
-Change the socket path then restart the service:
+Change the socket name then restart the service:
 .EX
-sudo hotkey-manager-daemon set socketPath /run/hotkey-manager.sock
+sudo hotkey-manager-daemon set socketName custom-hotkey-ipc
 sudo systemctl restart hotkey-manager-daemon.service
+.EE
+.IP 4. 4
+Reset the configuration to defaults:
+.EX
+sudo hotkey-manager-daemon reset
 .EE
 
 .SH FILES

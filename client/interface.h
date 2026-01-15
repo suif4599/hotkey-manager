@@ -3,6 +3,7 @@
 
 #include "ipc/uds.h"
 #include "ipc/encrypt.h"
+#include "config.h"
 
 #include <unordered_map>
 #include <string>
@@ -24,7 +25,7 @@ class HotkeyInterface {
     std::string serverPublicKey;
     mutable std::recursive_mutex interfaceMutex;
 public:
-    HotkeyInterface(const std::string& socketPath, int64_t timeoutMs = 5000);
+    HotkeyInterface(const std::string& socketName = DEFAULT_SOCKET_NAME, int64_t timeoutMs = 5000);
     ~HotkeyInterface();
     // Callback should return true if need to continue, false to break the mainloop
     std::string registerHotkey(

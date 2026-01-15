@@ -9,5 +9,6 @@
 #define KEEP_ALIVE_TIME (5 * 60 * 1000)
 #define CONFIG_FILE_PATH "/usr/local/etc/hotkey-manager-config.json"
 #define EPOLL_TIMEOUT_MS 1000
+#define DEFAULT_SOCKET_NAME "hotkey-manager-ipc"
 
 #endif // CONFIG_H

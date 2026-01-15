@@ -4,11 +4,12 @@
 #include <string>
 #include <sys/un.h>
 #include <sys/select.h>
+#include <sys/socket.h>
 #include <map>
 #include <queue>
 #include <vector>
 #include <iostream>
-#include "daemon/event.h"
+#include "ipc/event.h"
 
 namespace hotkey_manager {
 
@@ -37,9 +38,11 @@ class UnixDomainSocket {
 protected:
     int fd;
     struct sockaddr_un addr;
-    std::string socketPath;
+    socklen_t addrLen;
+    std::string socketName;
+    std::string displayName;
 public:
-    explicit UnixDomainSocket(const std::string& path);
+    explicit UnixDomainSocket(const std::string& name);
     virtual ~UnixDomainSocket();
     UnixDomainSocket(const UnixDomainSocket&) = delete;
     UnixDomainSocket& operator=(const UnixDomainSocket&) = delete;
@@ -53,7 +56,7 @@ class UnixDomainSocketServer : public UnixDomainSocket {
     std::queue<int> deletedClients;
     EventManager& eventManager;
 public:
-    explicit UnixDomainSocketServer(const std::string& path, const EventManager& eventManager);
+    explicit UnixDomainSocketServer(const std::string& name, const EventManager& eventManager);
     ~UnixDomainSocketServer() override;
     void next(struct epoll_event* events, int n);
     void deleteClient(int clientFd);
@@ -67,7 +70,7 @@ class UnixDomainSocketClient : public UnixDomainSocket {
     std::string buffer;
     int64_t timeoutMs;
 public:
-    UnixDomainSocketClient(const std::string& path, int64_t timeoutMs = 5000);
+    UnixDomainSocketClient(const std::string& name, int64_t timeoutMs = 5000);
     std::string* sendCommand(const std::string& command);
     std::string* receiveResponse();
 };

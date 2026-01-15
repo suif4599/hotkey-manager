@@ -1,6 +1,7 @@
 #ifndef DEAMON_MANAGER_H
 #define DEAMON_MANAGER_H
 
+#include "config.h"
 #include "daemon/keyboard.h"
 #include "daemon/device.h"
 #include "daemon/condition.h"
@@ -36,7 +37,7 @@ namespace hotkey_manager {
 class HotkeyManagerConfig {
     std::string configFile;
     std::string deviceFile;
-    std::string socketPath;
+    std::string socketName;
     std::string passwordHash;
     std::string keyBinding;
     static bool isAsciiPath(const std::string& path);
@@ -52,6 +53,7 @@ public:
     HotkeyManagerConfig& operator=(HotkeyManagerConfig&&) = delete;
 
     static HotkeyManagerConfig& getInstance(const std::string& configFile = "");
+    static void resetToDefault(const std::string& configFile = CONFIG_FILE_PATH);
     std::string& operator[](const std::string& key);
     const std::string& operator[](const std::string& key) const;
     void save() const;
@@ -81,7 +83,7 @@ class HotkeyManager {
     std::string commandFormatHotkey(int clientFd, const std::string& args);
     HotkeyManager(
         const std::string& file,
-        const std::string& socketPath,
+        const std::string& socketName,
         const std::string& passwordHash,
         const std::string& keyBinding,
         bool grabDevice

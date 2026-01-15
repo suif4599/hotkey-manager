@@ -9,7 +9,7 @@ using namespace hotkey_manager;
 int main() {
     try {
         // Establish the IPC session. The second argument keeps the default 5 second timeout
-        HotkeyInterface hotkeyInterface("/tmp/hotkey-manager.sock");
+        HotkeyInterface hotkeyInterface;
         std::cout << "Connected to hotkey-manager daemon." << std::endl;
 
         // Authenticate once before attempting to register any shortcuts

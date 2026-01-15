@@ -7,5 +7,6 @@
 #define KEEP_ALIVE_TIME (5 * 60 * 1000)
 #define CONFIG_FILE_PATH "@HOTKEY_MANAGER_CONFIG_PATH@"
 #define EPOLL_TIMEOUT_MS 1000
+#define DEFAULT_SOCKET_NAME "hotkey-manager-ipc"
 
 #endif // CONFIG_H

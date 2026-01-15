@@ -65,14 +65,14 @@ The install target places the daemon in `/usr/local/bin`, installs headers and t
 ```json
 {
 	"deviceFile": "auto",
-	"socketPath": "/tmp/hotkey-manager.sock",
+	"socketName": "hotkey-manager-ipc",
 	"passwordHash": "$argon2id$...",
 	"keyBinding": ""
 }
 ```
 
 - `deviceFile`: set to a specific `/dev/input/eventX` if auto-detection fails
-- `socketPath`: Unix domain socket exposed to clients
+- `socketName`: AF_UNIX abstract socket name exposed to clients (default `hotkey-manager-ipc`)
 - `passwordHash`: Argon2 hash used for client authentication
 - `keyBinding`: optional comma-separated key remaps in the form `FROM->TO`. Names must match `hotkey-manager-daemon keynames` output (without the `KEY_` prefix). Whitespace is ignored. Each source key may appear at most once and cannot map to itself. Example: `DELETE->F12, F12->DELETE, SYSRQ->F11, F11->SYSRQ`.
 
@@ -91,7 +91,8 @@ Usage:
 | hotkey-manager-daemon | Start the daemon (Require ROOT) |
 | hotkey-manager-daemon hash <password> | Generate password hash for given password |
 | hotkey-manager-daemon keynames | List all available key names |
-| hotkey-manager-daemon set <field> <value> | Modify the config file (Require ROOT). Fields: `deviceFile`, `socketPath`, `passwordHash`, `keyBinding`. |
+| hotkey-manager-daemon set <field> <value> | Modify the config file (Require ROOT). Fields: `deviceFile`, `socketName`, `passwordHash`, `keyBinding`. |
+| hotkey-manager-daemon reset | Reset the config file to default values (Require ROOT). |
 
 For example, use `sudo hotkey-manager-daemon set passwordHash $(hotkey-manager-daemon hash <password>)` to change password
 
@@ -104,7 +105,7 @@ Link against `libhotkey-manager-client.so` and include `hotkey_manager/interface
 ```cpp
 #include "hotkey_manager/interface.h"
 
-hotkey_manager::HotkeyInterface iface{"/tmp/hotkey-manager.sock"};
+hotkey_manager::HotkeyInterface iface{"hotkey-manager-ipc"};
 iface.authenticate("your-password");
 iface.registerHotkey("LEFTCTRL+LEFTSHIFT+A", [] {
 	// custom handler
@@ -124,7 +125,7 @@ After installing the wheel:
 ```python
 from hotkey_manager import HotkeyManagerInterface
 
-manager = HotkeyManagerInterface("/tmp/hotkey-manager.sock")
+manager = HotkeyManagerInterface("hotkey-manager-ipc")
 manager.authenticate("your-password")
 
 def on_hotkey():

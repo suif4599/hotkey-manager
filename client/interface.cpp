@@ -11,9 +11,9 @@ using namespace hotkey_manager;
 
 namespace hotkey_manager {
 
-HotkeyInterface::HotkeyInterface(const std::string& socketPath, int64_t timeoutMs)
+HotkeyInterface::HotkeyInterface(const std::string& socketName, int64_t timeoutMs)
 : callbackMap()
-, client(socketPath, timeoutMs)
+, client(socketName, timeoutMs)
 , encryptor() {
     std::lock_guard<std::recursive_mutex> lock(interfaceMutex);
     #ifndef ALLOW_DUMP

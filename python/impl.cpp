@@ -29,23 +29,29 @@ extern "C" int HotkeyManagerInterface_init(HotkeyManagerInterfaceObject* self, P
     self->hotkeyInterface = nullptr;
     self->registeredCallbacks = nullptr;
     self->callbackCount = 0;
-    self->socketPath = nullptr;
+    self->socketName = nullptr;
     self->timeoutMs = nullptr;
 
-    PyObject* socketPath = nullptr; // Borrow reference
+    PyObject* socketNameObj = nullptr; // Borrow reference
     PyObject* timeoutMs = nullptr; // Borrow too
-    static char kw_socket_path[] = "socket_path";
+    static char kw_socket_name[] = "socket_name";
     static char kw_timeout_ms[] = "timeout_ms";
-    static char* kwlist[] = {kw_socket_path, kw_timeout_ms, nullptr};
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|O", kwlist, &socketPath, &timeoutMs))
-        return -1;
-    if (socketPath == nullptr)
+    static char* kwlist[] = {kw_socket_name, kw_timeout_ms, nullptr};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|OO", kwlist, &socketNameObj, &timeoutMs))
         return -1;
 
     // Type checking and default value and setting attributes
-    if (!PyUnicode_Check(socketPath)) {
-        PyErr_SetString(PyExc_TypeError, "socket_path must be a string");
+    if (socketNameObj == nullptr) {
+        socketNameObj = PyUnicode_FromString(DEFAULT_SOCKET_NAME);
+        if (socketNameObj == nullptr)
+            return -1;
+        self->socketName = socketNameObj; // Owns reference from constructor
+    } else if (!PyUnicode_Check(socketNameObj)) {
+        PyErr_SetString(PyExc_TypeError, "socket_name must be a string");
         return -1;
+    } else {
+        self->socketName = socketNameObj;
+        Py_INCREF(socketNameObj);
     }
     if (timeoutMs == nullptr) {
         timeoutMs = PyLong_FromLong(5000); // Owner reference
@@ -59,26 +65,24 @@ extern "C" int HotkeyManagerInterface_init(HotkeyManagerInterfaceObject* self, P
         self->timeoutMs = timeoutMs;
         Py_INCREF(timeoutMs); // Increment reference count for borrowed reference
     }
-    self->socketPath = socketPath;
-    Py_INCREF(socketPath);
 
     try {
         self->registeredCallbacks = new std::map<std::string, std::vector<PyObject*>>();
     } catch (const std::bad_alloc&) {
-        Py_XDECREF(self->socketPath);
-        self->socketPath = nullptr;
+        Py_XDECREF(self->socketName);
+        self->socketName = nullptr;
         Py_XDECREF(self->timeoutMs);
         self->timeoutMs = nullptr;
         PyErr_SetString(PyExc_RuntimeError, "Failed to allocate memory for registeredCallbacks");
         return -1;
     }
 
-    std::string socketPathUtf8;
-    if (!UnicodeToUtf8(socketPath, socketPathUtf8)) {
+    std::string socketNameUtf8;
+    if (!UnicodeToUtf8(self->socketName, socketNameUtf8)) {
         delete self->registeredCallbacks;
         self->registeredCallbacks = nullptr;
-        Py_XDECREF(self->socketPath);
-        self->socketPath = nullptr;
+        Py_XDECREF(self->socketName);
+        self->socketName = nullptr;
         Py_XDECREF(self->timeoutMs);
         self->timeoutMs = nullptr;
         return -1;
@@ -87,8 +91,8 @@ extern "C" int HotkeyManagerInterface_init(HotkeyManagerInterfaceObject* self, P
     if (PyErr_Occurred()) {
         delete self->registeredCallbacks;
         self->registeredCallbacks = nullptr;
-        Py_XDECREF(self->socketPath);
-        self->socketPath = nullptr;
+        Py_XDECREF(self->socketName);
+        self->socketName = nullptr;
         Py_XDECREF(self->timeoutMs);
         self->timeoutMs = nullptr;
         return -1;
@@ -98,7 +102,7 @@ extern "C" int HotkeyManagerInterface_init(HotkeyManagerInterfaceObject* self, P
     bool initFailed = false;
     PyThreadState* threadState = PyEval_SaveThread();
     try {
-        self->hotkeyInterface = new HotkeyInterface(socketPathUtf8, static_cast<int>(timeout_ms_clong));
+        self->hotkeyInterface = new HotkeyInterface(socketNameUtf8, static_cast<int>(timeout_ms_clong));
     } catch (const std::exception& e) {
         initFailed = true;
         initError = e.what();
@@ -109,8 +113,8 @@ extern "C" int HotkeyManagerInterface_init(HotkeyManagerInterfaceObject* self, P
         PyErr_SetString(PyExc_RuntimeError, initError.c_str());
         delete self->registeredCallbacks;
         self->registeredCallbacks = nullptr;
-        Py_XDECREF(self->socketPath);
-        self->socketPath = nullptr;
+        Py_XDECREF(self->socketName);
+        self->socketName = nullptr;
         Py_XDECREF(self->timeoutMs);
         self->timeoutMs = nullptr;
         return -1;
@@ -136,7 +140,7 @@ extern "C" void HotkeyManagerInterface_del(HotkeyManagerInterfaceObject* self) {
         delete self->registeredCallbacks;
         self->registeredCallbacks = nullptr;
     }
-    Py_XDECREF(self->socketPath);
+    Py_XDECREF(self->socketName);
     Py_XDECREF(self->timeoutMs);
 
     PyObject_Free(reinterpret_cast<PyObject*>(self));
@@ -494,34 +498,34 @@ const char* HotkeyManagerModule_docstring = \
     "encrypted IPC, authentication, and hotkey dispatch for system-wide\n"\
     "shortcuts.";
 const char* HotkeyManagerInterface_docstring = \
-    "HotkeyManagerInterface(socket_path: str, timeout_ms: int = 5000)\n"\
+    "HotkeyManagerInterface(socket_name: str = \"" DEFAULT_SOCKET_NAME "\", timeout_ms: int = 5000)\n"\
     "--\n"\
     "\n"\
     "High-level client for interacting with the hotkey-manager daemon.\n"\
     "It manages socket connections, libsodium key exchange, password\n"\
     "authentication, callback registration, and keep-alive heartbeats so Python\n"\
     "applications can react to global shortcuts without dealing with raw IPC.";
-const char* HotkeyManagerInterface_socketPath_docstring = \
-    "socket_path: str\n"\
-    "    Read-only path to the Unix domain socket exposed by the daemon.\n"\
-    "    Must match the socketPath value in the daemon configuration.";
+const char* HotkeyManagerInterface_socketName_docstring = \
+    "socket_name: str\n"\
+    "    Read-only name of the AF_UNIX abstract socket exposed by the daemon.\n"\
+    "    Defaults to \"" DEFAULT_SOCKET_NAME "\" (matches the socketName configuration).";
 const char* HotkeyManagerInterface_timeoutMs_docstring = \
     "timeout_ms: int\n"\
     "    Read-only per-request timeout (milliseconds). Applied whenever the\n"\
     "    client waits for a response from the daemon.";
 const char* HotKeyManagerInterface_init_docstring = \
-    "__init__($self, /, socket_path, timeout_ms=5000)\n"\
+    "__init__($self, /, socket_name='" DEFAULT_SOCKET_NAME "', timeout_ms=5000)\n"\
     "--\n"\
     "\n"\
-    "Establish a new client session bound to the given Unix domain socket.\n"\
+    "Establish a new client session bound to the given abstract Unix domain socket name.\n"\
     "The constructor connects to the daemon, retrieves its public key,\n"\
     "registers a fresh client key pair, and prepares encrypted messaging.\n"\
     "The timeout controls how long commands wait for responses.\n"\
     "\n"\
     "Parameters\n"\
     "----------\n"\
-    "socket_path: str\n"\
-    "    Absolute path to the daemon Unix socket (matches configuration).\n"\
+    "socket_name: str\n"\
+    "    Name of the daemon's abstract Unix socket (matches configuration).\n"\
     "timeout_ms: int, default 5000\n"\
     "    Milliseconds to wait for each daemon response before timing out.";
 const char* HotkeyManagerInterface_authenticate_docstring = \

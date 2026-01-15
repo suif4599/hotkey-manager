@@ -5,11 +5,11 @@ from typing import Callable, Optional
 class HotkeyManagerInterface:
     "High-level client for interacting with the hotkey-manager daemon."
     
-    socket_path: str
+    socket_name: str
     timeout_ms: int
     
-    def __init__(self, socket_path: str, timeout_ms: int = 5000) -> None:
-        "Create a new interface bound to socket_path and optional timeout_ms."
+    def __init__(self, socket_name: str = "hotkey-manager-ipc", timeout_ms: int = 5000) -> None:
+        "Create a new interface bound to socket_name and optional timeout_ms."
 
     def authenticate(self, password: str) -> None:
         "Authenticate this process with the daemon using the configured password."

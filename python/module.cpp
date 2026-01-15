@@ -6,8 +6,8 @@ using namespace hotkey_manager;
 static PyMemberDef hotkeyManagerInterfaceMembers[] = {
     // T_OBJECT_EX will raise an AttributeError when the attribute is NULL
     {
-        "socket_path", T_OBJECT_EX, offsetof(HotkeyManagerInterfaceObject, socketPath),
-        READONLY, HotkeyManagerInterface_socketPath_docstring
+        "socket_name", T_OBJECT_EX, offsetof(HotkeyManagerInterfaceObject, socketName),
+        READONLY, HotkeyManagerInterface_socketName_docstring
     },
     {
         "timeout_ms", T_OBJECT_EX, offsetof(HotkeyManagerInterfaceObject, timeoutMs),

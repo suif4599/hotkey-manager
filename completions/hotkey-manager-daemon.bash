@@ -8,13 +8,17 @@ _hotkey_manager_daemon()
 
     case "${prev}" in
         set)
-            local fields="deviceFile socketPath passwordHash keyBinding"
+            local fields="deviceFile socketName passwordHash keyBinding"
             COMPREPLY=( $(compgen -W "${fields}" -- "${cur}") )
             return 0
             ;;
-        deviceFile|socketPath)
+        deviceFile)
             compopt -o filenames 2>/dev/null
             COMPREPLY=( $(compgen -f -- "${cur}") )
+            return 0
+            ;;
+        socketName)
+            COMPREPLY=()
             return 0
             ;;
         -h|--help)
@@ -24,7 +28,7 @@ _hotkey_manager_daemon()
     esac
 
     if [[ ${COMP_CWORD} -eq 1 ]]; then
-        local subcmds="hash keynames set -h --help"
+        local subcmds="hash keynames set reset -h --help"
         COMPREPLY=( $(compgen -W "${subcmds}" -- "${cur}") )
         return 0
     fi
