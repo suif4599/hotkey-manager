@@ -12,11 +12,6 @@ Keyboard::Keyboard() {
     }
 }
 
-Keyboard& Keyboard::getInstance() {
-    static Keyboard instance;
-    return instance;
-}
-
 void Keyboard::update(const Event& ev) {
     syslog(LOG_DEBUG, "Keyboard::update called with Event key=%d, type=%d", ev.get_key(), ev.get_type());
     switch (ev.get_type()) {

@@ -29,7 +29,8 @@ static bool isKeyboard(const std::string& path) {
 
 Device::Device(const std::string& file, const EventManager& manager, bool grab)
 : keyBindings()
-, eventManager(const_cast<EventManager&>(manager)) {
+, eventManager(const_cast<EventManager&>(manager))
+, keyboard() {
     fd = open(file.c_str(), O_RDONLY);
     if (fd < 0) {
         syslog(LOG_ERR, "Failed to open device file: %s", file.c_str());
@@ -115,8 +116,14 @@ std::string Device::autoDetectDeviceFile() {
     }
     if (candidates.empty())
         throw std::runtime_error("No suitable input device found for auto-detection");
-    if (candidates.size() > 1)
-        throw std::runtime_error("Multiple suitable input devices found for auto-detection");
+    if (candidates.size() > 1) {
+        std::string result;
+        for (size_t i = 0; i < candidates.size(); ++i) {
+            if (i > 0) result += ",";
+            result += candidates[i];
+        }
+        return result;
+    }
     return candidates[0];
 }
 
@@ -139,16 +146,20 @@ Event* Device::next() const {
             if (it != keyBindings.end()) {
                 code = it->second;
             }
+            Event* result = nullptr;
             switch (ev.value) {
                 case 1:
-                    return new PressEvent(code);
+                    result = new PressEvent(code);
+                    break;
                 case 0:
-                    return new ReleaseEvent(code);
+                    result = new ReleaseEvent(code);
+                    break;
                 case 2:
-                    return new RepeatEvent(code);
-                default:
-                    return nullptr;
+                    result = new RepeatEvent(code);
+                    break;
             }
+            keyboard.update(*result);
+            return result;
         }
         if (rc == LIBEVDEV_READ_STATUS_SYNC) {
             // Clear sync backlog so level-triggered epoll won't keep firing
@@ -211,6 +222,10 @@ void Device::addKeyBinding(const std::string& from, const std::string& to) {
     if (toKey == -1)
         throw std::runtime_error("Invalid target key name for binding: " + to);
     addKeyBinding(fromKey, toKey);
+}
+
+bool Device::check(Condition& cond) const {
+    return keyboard.check(cond);
 }
 
 } // namespace hotkey_manager

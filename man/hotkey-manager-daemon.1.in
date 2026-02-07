@@ -106,8 +106,8 @@ Fields are interpreted as follows:
 .B deviceFile
 specifies the event device to monitor.  The special value
 .B auto
-performs simple auto\-detection; an error is raised if zero or multiple
-candidates match.
+performs simple auto\-detection; an error is raised if zero candidates match.
+If multiple candidates are found, all are monitored simultaneously.
 .IP \(bu 2
 .B socketName
 is the AF_UNIX abstract socket name exposed to clients.  The daemon binds to

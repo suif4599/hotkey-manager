@@ -270,11 +270,10 @@ HotkeyManager::HotkeyManager(
     const std::string& passwordHash,
     const std::string& keyBinding,
     bool grabDevice
-): keyboard(Keyboard::getInstance())
-, sessionMap()
+): sessionMap()
 , hotkeyMap()
 , eventManager()
-, device(file, eventManager, grabDevice)
+, devices()
 , grabDevice(grabDevice)
 , server(socketName, eventManager)
 , encryptor()
@@ -301,9 +300,32 @@ HotkeyManager::HotkeyManager(
     commands["CloseSession"] = [this](int clientFd, const std::string& args) {
         return commandCloseSession(clientFd, args);
     };
-    commands["FormatHotkey"] = [this](int clinetFd, const std::string& args) {
-        return commandFormatHotkey(clinetFd, args);
+    commands["FormatHotkey"] = [this](int clientFd, const std::string& args) {
+        return commandFormatHotkey(clientFd, args);
     };
+
+    // Initialize devices
+    std::vector<std::string> deviceFiles;
+    if (file.find(',') != std::string::npos) {
+        // Multiple device files specified
+        size_t start = 0;
+        size_t end;
+        while ((end = file.find(',', start)) != std::string::npos) {
+            deviceFiles.push_back(file.substr(start, end - start));
+            start = end + 1;
+        }
+        deviceFiles.push_back(file.substr(start));
+    } else {
+        deviceFiles.push_back(file);
+    }
+    for (const std::string& deviceFile : deviceFiles) {
+        try {
+            devices.emplace_back(std::make_unique<Device>(deviceFile, eventManager, grabDevice));
+        } catch (const std::exception& e) {
+            syslog(LOG_ERR, "Failed to initialize device '%s': %s", deviceFile.c_str(), e.what());
+            throw;
+        }
+    }
 
     // Parse key bindings
     if (!keyBinding.empty()) {
@@ -314,7 +336,9 @@ HotkeyManager::HotkeyManager(
             std::string fromStr = (*iter)[1];
             std::string toStr = (*iter)[2];
             try {
-                device.addKeyBinding(fromStr, toStr);
+                for (auto& devicePtr : devices) {
+                    devicePtr->addKeyBinding(fromStr, toStr);
+                }
             } catch (const std::exception& e) {
                 syslog(LOG_WARNING, "Failed to add key binding '%s->%s': %s",
                        fromStr.c_str(), toStr.c_str(), e.what());
@@ -410,25 +434,26 @@ void HotkeyManager::mainloop() {
 
         // Handle new keyboard events
         Event* ev;
-        while (ev = device.next()) {
-            keyboard.update(*ev);
-            bool suppressed = false;
-            for (auto& [cond, sessions] : hotkeyMap) {
-                if (!keyboard.check(*cond))
-                    continue;
-                syslog(LOG_DEBUG, "Hotkey triggered: %s", cond->to_string().c_str());
-                for (auto& [session, passThrough] : sessions) {
-                    server.sendResponse(
-                        session->getFd(),
-                        encryptor.encrypt("[HOTKEY]: " + cond->to_string(), session->getPublicKey())
-                    );
-                    if (!passThrough)
-                        suppressed = true;
+        for (auto& devicePtr : devices) {
+            while (ev = devicePtr->next()) {
+                bool suppressed = false;
+                for (auto& [cond, sessions] : hotkeyMap) {
+                    if (!devicePtr->check(*cond))
+                        continue;
+                    syslog(LOG_DEBUG, "Hotkey triggered: %s", cond->to_string().c_str());
+                    for (auto& [session, passThrough] : sessions) {
+                        server.sendResponse(
+                            session->getFd(),
+                            encryptor.encrypt("[HOTKEY]: " + cond->to_string(), session->getPublicKey())
+                        );
+                        if (!passThrough)
+                            suppressed = true;
+                    }
                 }
+                if (grabDevice && !suppressed)
+                    devicePtr->passThroughEvent(*ev);
+                delete ev;
             }
-            if (grabDevice && !suppressed)
-                device.passThroughEvent(*ev);
-            delete ev;
         }
 
         // Handle new UDS events

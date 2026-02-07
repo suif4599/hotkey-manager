@@ -12,8 +12,8 @@ namespace hotkey_manager {
 class Keyboard {
     std::array<bool, 256> key_states;
     key_t lastUpdatedKey = -1;
-    Keyboard();
 public:
+    Keyboard();
     ~Keyboard() = default;
 
     Keyboard(const Keyboard&) = delete;
@@ -21,7 +21,6 @@ public:
     Keyboard(Keyboard&&) = delete;
     Keyboard& operator=(Keyboard&&) = delete;
 
-    static Keyboard& getInstance();
     void update(const Event& ev);
     bool check(Condition& cond) const;
 

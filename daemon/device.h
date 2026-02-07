@@ -2,6 +2,7 @@
 #define DEAMON_DEVICE_H
 
 #include "daemon/event.h"
+#include "daemon/keyboard.h"
 #include "ipc/event.h"
 #include <libevdev-1.0/libevdev/libevdev.h>
 #include <libevdev-1.0/libevdev/libevdev-uinput.h>
@@ -16,8 +17,13 @@ class Device {
     std::unordered_map<key_t, key_t> keyBindings;
     int fd;
     EventManager& eventManager;
+    mutable Keyboard keyboard;
 public:
     explicit Device(const std::string& file, const EventManager& manager, bool grab = false);
+    Device(const Device&) = delete;
+    Device& operator=(const Device&) = delete;
+    Device(Device&&) = delete;
+    Device& operator=(Device&&) = delete;
     ~Device();
     static std::string autoDetectDeviceFile();
     Event* next() const;
@@ -25,6 +31,7 @@ public:
     bool isGrabbed() const;
     void addKeyBinding(key_t from, key_t to);
     void addKeyBinding(const std::string& from, const std::string& to);
+    bool check(Condition& cond) const;
 };
 
 } // namespace hotkey_manager

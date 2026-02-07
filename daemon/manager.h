@@ -15,6 +15,7 @@
 #include <map>
 #include <unordered_map>
 #include <functional>
+#include <memory>
 
 namespace hotkey_manager {
 
@@ -60,11 +61,10 @@ public:
 };
 
 class HotkeyManager {
-    Keyboard& keyboard;
     std::map<int, Session*> sessionMap; // Maintain life cycle of Session*
     std::unordered_map<Condition*, std::vector<std::pair<Session*, bool>>> hotkeyMap; // Borrow Session*, Maintain Condition*
     EventManager eventManager;
-    Device device;
+    std::vector<std::unique_ptr<Device>> devices;
     bool grabDevice;
     UnixDomainSocketServer server;
     Encryptor encryptor;

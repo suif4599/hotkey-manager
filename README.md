@@ -5,6 +5,7 @@
 ## Features
 
 - System daemon built on libevdev for low-level keyboard access (root required)
+- Supports multiple keyboards simultaneously, allowing hotkeys to be triggered from any connected keyboard
 - Authenticated IPC over Unix domain sockets with libsodium-based public key exchange and Argon2 password hashes
 - C++ shared library (`libhotkey-manager-client.so`) and Python ABI3 extension (`hotkey_manager.abi3.so`)
 - Packaged as a systemd service with optional wheel generation during the build
@@ -71,7 +72,7 @@ The install target places the daemon in `/usr/local/bin`, installs headers and t
 }
 ```
 
-- `deviceFile`: set to a specific `/dev/input/eventX` if auto-detection fails
+- `deviceFile`: set to a specific `/dev/input/eventX` if auto-detection fails, or a comma-separated list of devices (e.g., `/dev/input/event0,/dev/input/event1`) to monitor multiple keyboards
 - `socketName`: AF_UNIX abstract socket name exposed to clients (default `hotkey-manager-ipc`)
 - `passwordHash`: Argon2 hash used for client authentication
 - `keyBinding`: optional comma-separated key remaps in the form `FROM->TO`. Names must match `hotkey-manager-daemon keynames` output (without the `KEY_` prefix). Whitespace is ignored. Each source key may appear at most once and cannot map to itself. Example: `DELETE->F12, F12->DELETE, SYSRQ->F11, F11->SYSRQ`.
