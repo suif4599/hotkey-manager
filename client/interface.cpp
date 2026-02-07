@@ -13,7 +13,8 @@ namespace hotkey_manager {
 
 HotkeyInterface::HotkeyInterface(const std::string& socketName, int64_t timeoutMs)
 : callbackMap()
-, client(socketName, timeoutMs)
+, eventManager()
+, client(socketName, eventManager, timeoutMs)
 , encryptor() {
     std::lock_guard<std::recursive_mutex> lock(interfaceMutex);
     #ifndef ALLOW_DUMP
@@ -182,6 +183,7 @@ void HotkeyInterface::mainloop(std::function<bool()> keepRunning) {
         bool handledResponse = false;
         try {
             std::lock_guard<std::recursive_mutex> lock(interfaceMutex);
+            eventManager.wait(100);
             while (true) {
                 std::string* response = client.receiveResponse();
                 if (!response)
@@ -248,8 +250,6 @@ void HotkeyInterface::mainloop(std::function<bool()> keepRunning) {
         // Check whether to exit
         if (!keepRunning())
             break;
-        if (!handledResponse)
-            usleep(1000);
     }
 }
 

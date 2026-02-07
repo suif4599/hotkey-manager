@@ -41,8 +41,9 @@ protected:
     socklen_t addrLen;
     std::string socketName;
     std::string displayName;
+    EventManager& eventManager;
 public:
-    explicit UnixDomainSocket(const std::string& name);
+    explicit UnixDomainSocket(const std::string& name, const EventManager& eventManager);
     virtual ~UnixDomainSocket();
     UnixDomainSocket(const UnixDomainSocket&) = delete;
     UnixDomainSocket& operator=(const UnixDomainSocket&) = delete;
@@ -54,7 +55,6 @@ class UnixDomainSocketServer : public UnixDomainSocket {
     std::map<int, ClientInfo> clientMapping;
     std::vector<ClientInfo*> newClients;
     std::queue<int> deletedClients;
-    EventManager& eventManager;
 public:
     explicit UnixDomainSocketServer(const std::string& name, const EventManager& eventManager);
     ~UnixDomainSocketServer() override;
@@ -70,7 +70,8 @@ class UnixDomainSocketClient : public UnixDomainSocket {
     std::string buffer;
     int64_t timeoutMs;
 public:
-    UnixDomainSocketClient(const std::string& name, int64_t timeoutMs = 5000);
+    UnixDomainSocketClient(const std::string& name, const EventManager& eventManager, int64_t timeoutMs = 5000);
+    ~UnixDomainSocketClient();
     std::string* sendCommand(const std::string& command);
     std::string* receiveResponse();
 };

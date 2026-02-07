@@ -20,6 +20,7 @@ class HotkeyInterface {
             std::function<void()>
         >>
     > callbackMap;
+    EventManager eventManager;
     UnixDomainSocketClient client;
     Encryptor encryptor;
     std::string serverPublicKey;

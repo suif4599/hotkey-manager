@@ -90,12 +90,13 @@ std::ostream& operator<<(std::ostream& os, const ClientInfo& info) {
     return os;
 }
 
-UnixDomainSocket::UnixDomainSocket(const std::string& name)
+UnixDomainSocket::UnixDomainSocket(const std::string& name, const EventManager& eventManager)
 : fd(-1)
 , addr{}
 , addrLen(0)
 , socketName(name)
-, displayName("@" + name) {
+, displayName("@" + name)
+, eventManager(const_cast<EventManager&>(eventManager)) {
     syslog(LOG_INFO, "Creating UnixDomainSocket with name: %s", displayName.c_str());
     fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd == -1)
@@ -112,11 +113,10 @@ UnixDomainSocket::~UnixDomainSocket() {
 }
 
 UnixDomainSocketServer::UnixDomainSocketServer(const std::string& name, const EventManager& eventManager)
-: UnixDomainSocket(name)
+: UnixDomainSocket(name, eventManager)
 , clientMapping()
 , newClients()
-, deletedClients()
-, eventManager(const_cast<EventManager&>(eventManager)) {
+, deletedClients() {
     syslog(LOG_INFO, "Creating UnixDomainSocketServer with name: %s", displayName.c_str());
     if (bind(fd, (struct sockaddr*)&addr, addrLen) == -1) {
         close(fd);
@@ -146,13 +146,15 @@ UnixDomainSocketServer::UnixDomainSocketServer(const std::string& name, const Ev
 UnixDomainSocketServer::~UnixDomainSocketServer() {
     syslog(LOG_INFO, "Destroying UnixDomainSocketServer with name: %s", displayName.c_str());
     for (const auto& [clientFd, _] : clientMapping) {
-        if (clientFd >= 0)
+        if (clientFd >= 0) {
+            eventManager.deleteFd(clientFd);
             close(clientFd);
+        }
     }
     clientMapping.clear();
     newClients.clear();
     deletedClients = std::queue<int>();
-
+    eventManager.deleteFd(fd);
 }
 
 void UnixDomainSocketServer::next(struct epoll_event* events, int n) {
@@ -287,8 +289,9 @@ int UnixDomainSocketServer::getDeletedClientFd() {
 
 UnixDomainSocketClient::UnixDomainSocketClient(
     const std::string& name,
+    const EventManager& eventManager,
     int64_t timeoutMs
-): UnixDomainSocket(name)
+): UnixDomainSocket(name, eventManager)
 , buffer()
 , timeoutMs(timeoutMs) {
     if (connect(fd, (struct sockaddr*)&addr, addrLen) == -1) {
@@ -311,6 +314,19 @@ UnixDomainSocketClient::UnixDomainSocketClient(
         throw std::runtime_error("Server socket is tampered (not owned by root)");
     }
     setNonBlocking(fd);
+
+    try {
+        eventManager.addFd(fd);
+    } catch (const std::exception& e) {
+        close(fd);
+        fd = -1;
+        syslog(LOG_ERR, "Failed to add socket to EventManager: %s", e.what());
+        throw;
+    }
+}
+
+UnixDomainSocketClient::~UnixDomainSocketClient() {
+    eventManager.deleteFd(fd);
 }
 
 std::string* UnixDomainSocketClient::sendCommand(const std::string& command) {

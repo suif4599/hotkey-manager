@@ -26,12 +26,14 @@ if __name__ == "__main__":
         venv_dir.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run([str(base_python), "-m", "venv", str(venv_dir)], check=True)
     venv_python = venv_dir / "bin" / "python"
-    venv_pip = venv_dir / "bin" / "pip"
     env = os.environ.copy()
     env.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
     env.setdefault("PIP_ROOT_USER_ACTION", "ignore")
     subprocess.run(
-        [str(venv_pip), "install", "--upgrade", "pip", "build"], check=True, env=env
+        [str(venv_python), "-m", "ensurepip", "--upgrade"], check=True, env=env
+    )
+    subprocess.run(
+        [str(venv_python), "-m", "pip", "install", "--upgrade", "pip", "build"], check=True, env=env
     )
     subprocess.run(
         [str(venv_python), "-m", "build", "--wheel", "--outdir", str(wheel_dir), str(package_dir)],
