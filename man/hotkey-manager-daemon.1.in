@@ -63,6 +63,8 @@ privileges.  Supported fields are
 and
 .BR passwordHash ,
 and
+.BR gamemodeHotkey ,
+and
 .BR keyBinding .
 The daemon is not automatically restarted; reload manually via systemd after
 editing.
@@ -71,7 +73,7 @@ editing.
 Rewrites the configuration file to default values (requires root). Existing
 content is replaced with the same defaults used on first start: deviceFile
 `auto`, socketName `hotkey-manager-ipc`, the bundled Argon2 password hash, and
-an empty keyBinding. No backup is created.
+an empty gamemodeHotkey and keyBinding. No backup is created.
 .TP
 .B --help
 Displays a usage summary and a sample configuration block.
@@ -96,6 +98,7 @@ permissions (0600) containing:
     "deviceFile": "auto",
     "socketName": "hotkey-manager-ipc",
     "passwordHash": "$argon2id$...",
+    "gamemodeHotkey": "",
     "keyBinding": ""
 }
 .fi
@@ -116,6 +119,10 @@ SO_PEERCRED checks to verify peers.
 .IP \(bu 2
 .B passwordHash
 stores the Argon2id hash clients must satisfy during authentication.
+.IP \(bu 2
+.B gamemodeHotkey
+sets a hotkey that toggles game mode on/off. Use an empty string to disable it.
+The daemon does not currently attach any behavior to game mode.
 .IP \(bu 2
 .B keyBinding
 defines optional key remapping before hotkey detection and pass-through.  The

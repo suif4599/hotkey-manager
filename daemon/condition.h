@@ -85,6 +85,7 @@ public:
     Condition(const Condition& other);
     virtual ~Condition();
     static Condition from_string(const std::string& condStr);
+    bool isRelatedKey(key_t key) const;
     virtual bool check(const Keyboard& keyboard);
     virtual const std::string& to_string() const;
     virtual size_t hash() const;

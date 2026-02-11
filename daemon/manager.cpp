@@ -14,12 +14,14 @@
 #include <cerrno>
 #include <cstring>
 #include <system_error>
+#include <limits>
 
 using namespace hotkey_manager;
 
 namespace hotkey_manager {
 
 static const char* DEFAULT_PASSWORD_HASH_STR = "$argon2id$v=19$m=65536,t=2,p=1$gVhSWbbAsC+mm2QfArc/xw$5fdVpc61mjx0xkbrMVi9YCXhIcl29h3fHvZkYO4TsIU";
+static constexpr int INTERNAL_CLIENT_FD = -42;
 
 static void ensureParentDirExists(const std::filesystem::path& parent) {
     if (parent.empty())
@@ -43,6 +45,7 @@ static std::string defaultConfigPayload() {
         + "    \"deviceFile\": \"auto\",\n"
         + "    \"socketName\": \"" DEFAULT_SOCKET_NAME "\",\n"
         + "    \"passwordHash\": \"" + std::string(DEFAULT_PASSWORD_HASH_STR) + "\",\n"
+        + "    \"gamemodeHotkey\": \"\",\n"
         + "    \"keyBinding\": \"\"\n"
         + "}\n"; // default password: 123456
 }
@@ -143,6 +146,7 @@ void HotkeyManagerConfig::parseConfig(const std::string& content) {
 
     socketName = getRequired("socketName");
     passwordHash = getRequired("passwordHash");
+    gamemodeHotkey = getRequired("gamemodeHotkey");
     keyBinding = getRequired("keyBinding");
 }
 
@@ -190,9 +194,9 @@ HotkeyManagerConfig::HotkeyManagerConfig(const std::string& filePath)
 
     parseConfig(content);
     setSecurePermissions();
-        syslog(LOG_INFO, "Using config file: %s", configFile.c_str());
-        syslog(LOG_INFO, "Config loaded: deviceFile=%s, socketName=%s, passwordHash=%s",
-            deviceFile.c_str(), socketName.c_str(), passwordHash.c_str());
+    syslog(LOG_INFO, "Using config file: %s", configFile.c_str());
+    syslog(LOG_INFO, "Config loaded: deviceFile=%s, socketName=%s, passwordHash=%s",
+        deviceFile.c_str(), socketName.c_str(), passwordHash.c_str());
 }
 
 HotkeyManagerConfig& HotkeyManagerConfig::getInstance(const std::string& configFile) {
@@ -212,6 +216,8 @@ std::string& HotkeyManagerConfig::operator[](const std::string& key) {
         return socketName;
     else if (key == "passwordHash")
         return passwordHash;
+    else if (key == "gamemodeHotkey")
+        return gamemodeHotkey;
     else if (key == "keyBinding")
         return keyBinding;
     else
@@ -226,6 +232,8 @@ const std::string& HotkeyManagerConfig::operator[](const std::string& key) const
         return socketName;
     else if (key == "passwordHash")
         return passwordHash;
+    else if (key == "gamemodeHotkey")
+        return gamemodeHotkey;
     else if (key == "keyBinding")
         return keyBinding;
     else
@@ -250,6 +258,7 @@ void HotkeyManagerConfig::save() const {
             << "    \"deviceFile\": \"" << deviceFile << "\",\n"
             << "    \"socketName\": \"" << socketName << "\",\n"
             << "    \"passwordHash\": \"" << passwordHash << "\",\n"
+            << "    \"gamemodeHotkey\": \"" << gamemodeHotkey << "\",\n"
             << "    \"keyBinding\": \"" << keyBinding << "\"\n"
             << "}\n";
     file.close();
@@ -268,6 +277,7 @@ HotkeyManager::HotkeyManager(
     const std::string& file,
     const std::string& socketName,
     const std::string& passwordHash,
+    const std::string& gamemodeHotkey,
     const std::string& keyBinding,
     bool grabDevice
 ): sessionMap()
@@ -275,13 +285,21 @@ HotkeyManager::HotkeyManager(
 , eventManager()
 , devices()
 , grabDevice(grabDevice)
+, gamemode(0)
+, gamemodeKey(-1)
+, gamemodeKeyDown(false)
+, gamemodeHotkey(gamemodeHotkey)
+, internalClientFd(INTERNAL_CLIENT_FD)
+, internalClientInfo(nullptr)
+, internalSession(nullptr)
 , server(socketName, eventManager)
 , encryptor()
 , commands()
 , deleteWaitlist()
 , lastKeepAliveTimestamps()
 , passwordHash(passwordHash)
-, pidSessionCounts() {
+, pidSessionCounts()
+, notificationManager(NOTIFICATION_APP_NAME, NOTIFICATION_ICON_NAME) {
     commands["RegisterPublicKey"] = [this](int clientFd, const std::string& args) {
         return commandRegisterPublicKey(clientFd, args);
     };
@@ -345,6 +363,22 @@ HotkeyManager::HotkeyManager(
             }
         }
     }
+
+    if (!gamemodeHotkey.empty()) {
+        internalClientInfo = std::make_unique<ClientInfo>(internalClientFd, "0:0:0");
+        internalSession = new Session(internalClientInfo.get());
+        internalSession->authenticate();
+        sessionMap[internalClientFd] = internalSession;
+        std::string response = commandRegisterHotkey(internalClientFd, gamemodeHotkey + "; true"); // No callback
+        if (response.rfind("[Error]:", 0) == 0) {
+            sessionMap.erase(internalClientFd);
+            delete internalSession;
+            internalSession = nullptr;
+            internalClientInfo.reset();
+            throw std::runtime_error("Failed to register gamemodeHotkey: " + response);
+        }
+        syslog(LOG_INFO, "Registered gamemodeHotkey: %s", gamemodeHotkey.c_str());
+    }
     syslog(LOG_INFO, "HotkeyManager initialized with deviceFile=%s, socketName=%s",
         file.c_str(), socketName.c_str());
 };
@@ -400,6 +434,7 @@ HotkeyManager& HotkeyManager::getInstance(
         config["deviceFile"],
         config["socketName"],
         config["passwordHash"],
+        config["gamemodeHotkey"],
         config["keyBinding"],
         grabDevice
     );
@@ -420,6 +455,8 @@ HotkeyManager::~HotkeyManager() {
 void HotkeyManager::mainloop() {
     syslog(LOG_INFO, "HotkeyManager mainloop started.");
     int64_t lastTime = 0;
+    int64_t minimalTimeSession = std::numeric_limits<int64_t>::max(); // Minimal timestamp to check for session timeouts
+    int64_t minimalTimeNotification = std::numeric_limits<int64_t>::max(); // Minimal timestamp to check for notification expirations
     while (true) {
         // Delete sessions in waitlist
         for (int clientFd : deleteWaitlist) {
@@ -429,97 +466,150 @@ void HotkeyManager::mainloop() {
         deleteWaitlist.clear();
 
         // Epoll wait
-        auto [events, n] = eventManager.wait(EPOLL_TIMEOUT_MS);
-        if (n == 0) continue;
-
-        // Handle new keyboard events
-        Event* ev;
-        for (auto& devicePtr : devices) {
-            while (ev = devicePtr->next()) {
-                bool suppressed = false;
-                for (auto& [cond, sessions] : hotkeyMap) {
-                    if (!devicePtr->check(*cond))
-                        continue;
-                    syslog(LOG_DEBUG, "Hotkey triggered: %s", cond->to_string().c_str());
-                    for (auto& [session, passThrough] : sessions) {
-                        server.sendResponse(
-                            session->getFd(),
-                            encryptor.encrypt("[HOTKEY]: " + cond->to_string(), session->getPublicKey())
-                        );
-                        if (!passThrough)
-                            suppressed = true;
-                    }
-                }
-                if (grabDevice && !suppressed)
-                    devicePtr->passThroughEvent(*ev);
-                delete ev;
+        int64_t now = getTimestampMs();
+        const int64_t kMaxTime = std::numeric_limits<int64_t>::max();
+        int64_t nextSessionDeadline = kMaxTime;
+        if (minimalTimeSession != kMaxTime) {
+            if (minimalTimeSession <= kMaxTime - KEEP_ALIVE_TIME)
+                nextSessionDeadline = minimalTimeSession + KEEP_ALIVE_TIME;
+        }
+        int64_t nextNotificationDeadline = minimalTimeNotification;
+        int64_t nextDeadline = std::min(nextSessionDeadline, nextNotificationDeadline);
+        int timeoutMs = -1;
+        if (nextDeadline != kMaxTime) {
+            if (nextDeadline <= now) {
+                timeoutMs = 0;
+            } else {
+                int64_t delta = nextDeadline - now;
+                if (delta > std::numeric_limits<int>::max())
+                    timeoutMs = std::numeric_limits<int>::max();
+                else
+                    timeoutMs = static_cast<int>(delta);
             }
         }
+        auto [events, n] = eventManager.wait(timeoutMs);
+        if (n > 0) {
+            // Handle new keyboard events
+            Event* ev;
+            for (auto& devicePtr : devices) {
+                while (ev = devicePtr->next()) {
+                    bool suppressed = false;
+                    if (ev->get_type() == 2 && ev->get_key() == gamemodeKey)
+                        gamemodeKeyDown = false;
+                    for (auto& [cond, sessions] : hotkeyMap) {
+                        if (!cond->isRelatedKey(ev->get_key()))
+                            continue;
+                        if (!devicePtr->check(*cond))
+                            continue;
+                        syslog(LOG_DEBUG, "Hotkey triggered: %s", cond->to_string().c_str());
+                        for (auto& [session, passThrough] : sessions) {
+                            if (session->getFd() == internalClientFd) {
+                                if (ev->get_type() != 1 || gamemodeKeyDown)
+                                    continue;
+                                gamemodeKeyDown = true;
+                                gamemodeKey = ev->get_key();
+                                gamemode = (gamemode + 1) % 3;
+                                int64_t next = notificationManager.sendNotification(
+                                    "Game Mode",
+                                    gamemode == 0 ? "OFF (default)" : (gamemode == 1 ? "ON (ignore)" : "ON (bypass)"),
+                                    NOTIFICATION_EXPIRE_TIME_MS
+                                );
+                                minimalTimeNotification = std::min(minimalTimeNotification, next);
+                                syslog(LOG_INFO, "Game mode switched to %s", gamemode == 0 ? "OFF (default)" : (gamemode == 1 ? "ON (ignore)" : "ON (bypass)"));
+                                continue;
+                            }
+                            if (gamemode != 1)
+                                server.sendResponse(
+                                    session->getFd(),
+                                    encryptor.encrypt("[HOTKEY]: " + cond->to_string(), session->getPublicKey())
+                                );
+                            if (!passThrough && gamemode == 0)
+                                suppressed = true;
+                        }
+                    }
+                    if (grabDevice && !suppressed)
+                        devicePtr->passThroughEvent(*ev);
+                    delete ev;
+                }
+            }
 
-        // Handle new UDS events
-        server.next(events, n);
-        // Accept
-        ClientInfo* newClient = server.getNewClient();
-        if (newClient) {
-            // Limit connections per process
-            int pid = std::stoi(newClient->getProcessInfo().substr(0, newClient->getProcessInfo().find(':')));
-            auto it = pidSessionCounts.find(pid);
-            if (it == pidSessionCounts.end()) {
-                pidSessionCounts[pid] = 1;
-            } else {
-                it->second++;
-                if (it->second > MAX_CONNECTIONS_FOR_ONE_PROCESS) {
-                    syslog(LOG_WARNING, "Process %d exceeded max connections (%d), rejecting new connection",
-                           pid, MAX_CONNECTIONS_FOR_ONE_PROCESS);
+            // Handle new UDS events
+            server.next(events, n);
+            // Accept
+            ClientInfo* newClient = server.getNewClient();
+            if (newClient) {
+                // Limit connections per process
+                int pid = std::stoi(newClient->getProcessInfo().substr(0, newClient->getProcessInfo().find(':')));
+                auto it = pidSessionCounts.find(pid);
+                if (it == pidSessionCounts.end()) {
+                    pidSessionCounts[pid] = 1;
+                } else {
+                    it->second++;
+                    if (it->second > MAX_CONNECTIONS_FOR_ONE_PROCESS) {
+                        syslog(LOG_WARNING, "Process %d exceeded max connections (%d), rejecting new connection",
+                            pid, MAX_CONNECTIONS_FOR_ONE_PROCESS);
+                        server.sendResponse(
+                            newClient->getFd(),
+                            encryptor.encrypt("[Error]: Exceeded max connections per process", "")
+                        );
+                        server.deleteClient(newClient->getFd());
+                        it->second--;
+                        continue;
+                    }
+                }
+                try {
+                    eventManager.addFd(newClient->getFd(), EPOLLIN | EPOLLRDHUP);
+                } catch (const std::exception& e) {
+                    syslog(LOG_ERR, "Failed to add new clientFd=%d to EventManager: %s",
+                        newClient->getFd(), e.what());
                     server.sendResponse(
                         newClient->getFd(),
-                        encryptor.encrypt("[Error]: Exceeded max connections per process", "")
+                        encryptor.encrypt("[Error]: Internal server error", "")
                     );
                     server.deleteClient(newClient->getFd());
                     it->second--;
                     continue;
                 }
+                sessionMap[newClient->getFd()] = new Session(newClient);
+                int64_t now = getTimestampMs();
+                lastKeepAliveTimestamps[sessionMap[newClient->getFd()]] = now;
+                minimalTimeSession = std::min(minimalTimeSession, now);
+                syslog(LOG_INFO, "New client connected: %s", newClient->getProcessInfo().c_str());
             }
-            try {
-                eventManager.addFd(newClient->getFd(), EPOLLIN | EPOLLRDHUP);
-            } catch (const std::exception& e) {
-                syslog(LOG_ERR, "Failed to add new clientFd=%d to EventManager: %s",
-                       newClient->getFd(), e.what());
-                server.sendResponse(
-                    newClient->getFd(),
-                    encryptor.encrypt("[Error]: Internal server error", "")
-                );
-                server.deleteClient(newClient->getFd());
-                it->second--;
-                continue;
+            // Receive
+            auto [clientFd, command] = server.receiveCommand();
+            if (command) {
+                execute(clientFd, *command);
+                delete command;
             }
-            sessionMap[newClient->getFd()] = new Session(newClient);
-            lastKeepAliveTimestamps[sessionMap[newClient->getFd()]] = getTimestampMs();
-            syslog(LOG_INFO, "New client connected: %s", newClient->getProcessInfo().c_str());
+            // Close
+            int deletedClientFd = server.getDeletedClientFd();
+            if (deletedClientFd != -1)
+                closeSession(deletedClientFd);
         }
-        // Receive
-        auto [clientFd, command] = server.receiveCommand();
-        if (command) {
-            execute(clientFd, *command);
-            delete command;
-        }
-        // Close
-        int deletedClientFd = server.getDeletedClientFd();
-        if (deletedClientFd != -1)
-            closeSession(deletedClientFd);
 
+        now = getTimestampMs();
         // Delete sessions with timeout
-        lastTime = getTimestampMs() - KEEP_ALIVE_TIME;
-        for (auto& [session, timestamp] : lastKeepAliveTimestamps) {
-            if (timestamp > lastTime)
-                continue;
-            int clientFd = session->getFd();
-            syslog(LOG_INFO, "Session timeout for clientFd=%d, closing session", clientFd);
-            server.sendResponse(
-                clientFd,
-                encryptor.encrypt("[Error]: KeepAlive timeout, closing session", session->getPublicKey())
-            );
-            deleteWaitlist.push_back(clientFd);
+        lastTime = now - KEEP_ALIVE_TIME;
+        if (minimalTimeSession < lastTime) {
+            minimalTimeSession = std::numeric_limits<int64_t>::max();
+            for (auto& [session, timestamp] : lastKeepAliveTimestamps) {
+                if (timestamp > lastTime) {
+                    minimalTimeSession = std::min(minimalTimeSession, timestamp);
+                    continue;
+                }
+                int clientFd = session->getFd();
+                syslog(LOG_INFO, "Session timeout for clientFd=%d, closing session", clientFd);
+                server.sendResponse(
+                    clientFd,
+                    encryptor.encrypt("[Error]: KeepAlive timeout, closing session", session->getPublicKey())
+                );
+                deleteWaitlist.push_back(clientFd);
+            }
+        }
+        // Clear expired notifications
+        if (minimalTimeNotification < now) {
+            minimalTimeNotification = notificationManager.clearExpired();
         }
     }
 }

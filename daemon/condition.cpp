@@ -274,6 +274,10 @@ Condition Condition::from_string(const std::string& cond_str) {
     return Condition(tokens.cbegin(), tokens.cend());
 }
 
+bool Condition::isRelatedKey(key_t key) const {
+    return related_keys.find(key) != related_keys.end();
+}
+
 bool Condition::check(const Keyboard& keyboard) {
     if (conds.empty())
         return false;

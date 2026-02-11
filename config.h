@@ -10,5 +10,10 @@
 #define CONFIG_FILE_PATH "/usr/local/etc/hotkey-manager-config.json"
 #define EPOLL_TIMEOUT_MS 1000
 #define DEFAULT_SOCKET_NAME "hotkey-manager-ipc"
+#define NOTIFICATION_APP_NAME "hotkey-manager-daemon"
+#define NOTIFICATION_ICON_NAME "input-gaming"
+#define NOTIFICATION_EXPIRE_TIME_MS 800
+#define DBUS_REPLY_TIMEOUT_MS 2000
+
 
 #endif // CONFIG_H

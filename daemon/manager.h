@@ -6,6 +6,7 @@
 #include "daemon/device.h"
 #include "daemon/condition.h"
 #include "daemon/session.h"
+#include "daemon/notification.h"
 #include "ipc/uds.h"
 #include "ipc/encrypt.h"
 
@@ -41,6 +42,7 @@ class HotkeyManagerConfig {
     std::string socketName;
     std::string passwordHash;
     std::string keyBinding;
+    std::string gamemodeHotkey;
     static bool isAsciiPath(const std::string& path);
     static bool isPlainText(const std::string& content);
     void setSecurePermissions() const;
@@ -66,6 +68,13 @@ class HotkeyManager {
     EventManager eventManager;
     std::vector<std::unique_ptr<Device>> devices;
     bool grabDevice;
+    int gamemode; // 0: Off(default), 1: On(ignore), 2: On(bypass)
+    key_t gamemodeKey;
+    bool gamemodeKeyDown;
+    std::string gamemodeHotkey;
+    int internalClientFd;
+    std::unique_ptr<ClientInfo> internalClientInfo;
+    Session* internalSession;
     UnixDomainSocketServer server;
     Encryptor encryptor;
     std::string passwordHash;
@@ -73,6 +82,7 @@ class HotkeyManager {
     std::vector<int> deleteWaitlist; // Send Response and then delete session
     std::map<Session*, int64_t> lastKeepAliveTimestamps;
     std::map<int, int> pidSessionCounts;
+    NotificationManager notificationManager;
     void execute(int clientFd, const std::string& command);
     std::string commandRegisterPublicKey(int clientFd, const std::string& args);
     std::string commandAuthenticate(int clientFd, const std::string& args);
@@ -85,6 +95,7 @@ class HotkeyManager {
         const std::string& file,
         const std::string& socketName,
         const std::string& passwordHash,
+        const std::string& gamemodeHotkey,
         const std::string& keyBinding,
         bool grabDevice
     );

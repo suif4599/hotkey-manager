@@ -14,14 +14,14 @@
 
 - Linux with `systemd` and access to `/dev/input/event*`
 - Build tooling: `cmake` >= 3.15, a C++17 compiler, `make`, `pkg-config`
-- Libraries: `libevdev-dev`, `libsodium-dev`
+- Libraries: `libevdev-dev`, `libsodium-dev`, `libdbus-1-dev`
 - Utilities: `gzip`
 - Optional (Python bindings): `python` >= 3.2, `pip`, `virtualenv`
 
 Debian/Ubuntu example:
 
 ```bash
-sudo apt install build-essential cmake pkg-config libevdev-dev libsodium-dev python3 python3-dev python3-venv gzip bash-completion
+sudo apt install build-essential cmake pkg-config libevdev-dev libsodium-dev libdbus-1-dev python3 python3-dev python3-venv gzip bash-completion
 ```
 
 ## Build
@@ -68,6 +68,7 @@ The install target places the daemon in `/usr/local/bin`, installs headers and t
 	"deviceFile": "auto",
 	"socketName": "hotkey-manager-ipc",
 	"passwordHash": "$argon2id$...",
+	"gamemodeHotkey": "",
 	"keyBinding": ""
 }
 ```
@@ -75,6 +76,11 @@ The install target places the daemon in `/usr/local/bin`, installs headers and t
 - `deviceFile`: set to a specific `/dev/input/eventX` if auto-detection fails, or a comma-separated list of devices (e.g., `/dev/input/event0,/dev/input/event1`) to monitor multiple keyboards
 - `socketName`: AF_UNIX abstract socket name exposed to clients (default `hotkey-manager-ipc`)
 - `passwordHash`: Argon2 hash used for client authentication
+- `gamemodeHotkey`: empty string disables game mode; a valid hotkey cycles game mode through three states: default, ignore, bypass
+- Game mode states:
+	- `default`: hotkeys behave normally; grab/bypass follow each hotkey's own `passthrough` setting
+	- `ignore`: no hotkeys trigger (all hotkeys are suppressed)
+	- `bypass`: all hotkeys always pass events through, ignoring each hotkey's `passthrough` setting
 - `keyBinding`: optional comma-separated key remaps in the form `FROM->TO`. Names must match `hotkey-manager-daemon keynames` output (without the `KEY_` prefix). Whitespace is ignored. Each source key may appear at most once and cannot map to itself. Example: `DELETE->F12, F12->DELETE, SYSRQ->F11, F11->SYSRQ`.
 
 ## Run the Daemon
@@ -92,7 +98,7 @@ Usage:
 | hotkey-manager-daemon | Start the daemon (Require ROOT) |
 | hotkey-manager-daemon hash <password> | Generate password hash for given password |
 | hotkey-manager-daemon keynames | List all available key names |
-| hotkey-manager-daemon set <field> <value> | Modify the config file (Require ROOT). Fields: `deviceFile`, `socketName`, `passwordHash`, `keyBinding`. |
+| hotkey-manager-daemon set <field> <value> | Modify the config file (Require ROOT). Fields: `deviceFile`, `socketName`, `passwordHash`, `gamemodeHotkey`, `keyBinding`. |
 | hotkey-manager-daemon reset | Reset the config file to default values (Require ROOT). |
 
 For example, use `sudo hotkey-manager-daemon set passwordHash $(hotkey-manager-daemon hash <password>)` to change password
