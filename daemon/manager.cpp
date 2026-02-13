@@ -138,11 +138,11 @@ void HotkeyManagerConfig::parseConfig(const std::string& content) {
         return it->second;
     };
 
-    const std::string& deviceFileValue = getRequired("deviceFile");
-    if (deviceFileValue == "auto")
-        deviceFile = Device::autoDetectDeviceFile();
+    deviceFileRaw = getRequired("deviceFile");
+    if (deviceFileRaw == "auto")
+        deviceFileResolved = Device::autoDetectDeviceFile();
     else
-        deviceFile = deviceFileValue;
+        deviceFileResolved = deviceFileRaw;
 
     socketName = getRequired("socketName");
     passwordHash = getRequired("passwordHash");
@@ -196,7 +196,10 @@ HotkeyManagerConfig::HotkeyManagerConfig(const std::string& filePath)
     setSecurePermissions();
     syslog(LOG_INFO, "Using config file: %s", configFile.c_str());
     syslog(LOG_INFO, "Config loaded: deviceFile=%s, socketName=%s, passwordHash=%s",
-        deviceFile.c_str(), socketName.c_str(), passwordHash.c_str());
+        deviceFileRaw.c_str(), socketName.c_str(), passwordHash.c_str());
+    if (deviceFileRaw == "auto") {
+        syslog(LOG_INFO, "Auto-detected deviceFile resolved to: %s", deviceFileResolved.c_str());
+    }
 }
 
 HotkeyManagerConfig& HotkeyManagerConfig::getInstance(const std::string& configFile) {
@@ -211,7 +214,7 @@ HotkeyManagerConfig& HotkeyManagerConfig::getInstance(const std::string& configF
 std::string& HotkeyManagerConfig::operator[](const std::string& key) {
     // Setitem
     if (key == "deviceFile")
-        return deviceFile;
+        return deviceFileRaw;
     else if (key == "socketName")
         return socketName;
     else if (key == "passwordHash")
@@ -227,7 +230,7 @@ std::string& HotkeyManagerConfig::operator[](const std::string& key) {
 const std::string& HotkeyManagerConfig::operator[](const std::string& key) const {
     // Getitem
     if (key == "deviceFile")
-        return deviceFile;
+        return deviceFileRaw;
     else if (key == "socketName")
         return socketName;
     else if (key == "passwordHash")
@@ -238,6 +241,15 @@ const std::string& HotkeyManagerConfig::operator[](const std::string& key) const
         return keyBinding;
     else
         throw std::runtime_error("Unknown config key: " + key);
+}
+
+const std::string& HotkeyManagerConfig::resolvedDeviceFile() {
+    if (deviceFileRaw == "auto") {
+        if (deviceFileResolved.empty())
+            deviceFileResolved = Device::autoDetectDeviceFile();
+        return deviceFileResolved;
+    }
+    return deviceFileRaw;
 }
 
 void HotkeyManagerConfig::save() const {
@@ -255,7 +267,7 @@ void HotkeyManagerConfig::save() const {
     if (!file.is_open())
         throw std::runtime_error("Failed to open config file for writing");
     file << "{\n"
-            << "    \"deviceFile\": \"" << deviceFile << "\",\n"
+            << "    \"deviceFile\": \"" << deviceFileRaw << "\",\n"
             << "    \"socketName\": \"" << socketName << "\",\n"
             << "    \"passwordHash\": \"" << passwordHash << "\",\n"
             << "    \"gamemodeHotkey\": \"" << gamemodeHotkey << "\",\n"
@@ -432,7 +444,7 @@ HotkeyManager& HotkeyManager::getInstance(
 ) {
     static HotkeyManagerConfig& config = HotkeyManagerConfig::getInstance(configFile);
     static HotkeyManager instance(
-        config["deviceFile"],
+        config.resolvedDeviceFile(),
         config["socketName"],
         config["passwordHash"],
         config["gamemodeHotkey"],

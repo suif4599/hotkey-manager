@@ -38,7 +38,8 @@ namespace hotkey_manager {
 
 class HotkeyManagerConfig {
     std::string configFile;
-    std::string deviceFile;
+    std::string deviceFileRaw;
+    std::string deviceFileResolved;
     std::string socketName;
     std::string passwordHash;
     std::string keyBinding;
@@ -59,6 +60,7 @@ public:
     static void resetToDefault(const std::string& configFile = CONFIG_FILE_PATH);
     std::string& operator[](const std::string& key);
     const std::string& operator[](const std::string& key) const;
+    const std::string& resolvedDeviceFile();
     void save() const;
 };
 
