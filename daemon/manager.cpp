@@ -340,10 +340,11 @@ HotkeyManager::HotkeyManager(
         try {
             devices.emplace_back(std::make_unique<Device>(deviceFile, eventManager, grabDevice));
         } catch (const std::exception& e) {
-            syslog(LOG_ERR, "Failed to initialize device '%s': %s", deviceFile.c_str(), e.what());
-            throw;
+            syslog(LOG_WARNING, "Failed to initialize device '%s': %s", deviceFile.c_str(), e.what());
         }
     }
+    if (devices.empty())
+        throw std::runtime_error("Failed to initialize any input device");
 
     // Parse key bindings
     if (!keyBinding.empty()) {

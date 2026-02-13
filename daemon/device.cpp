@@ -33,27 +33,27 @@ Device::Device(const std::string& file, const EventManager& manager, bool grab)
 , keyboard() {
     fd = open(file.c_str(), O_RDONLY);
     if (fd < 0) {
-        syslog(LOG_ERR, "Failed to open device file: %s", file.c_str());
+        syslog(LOG_WARNING, "Failed to open device file: %s", file.c_str());
         throw std::runtime_error("Failed to open device file: " + file);
     }
 
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags == -1 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
         close(fd);
-        syslog(LOG_ERR, "Failed to configure device file as non-blocking: %s", file.c_str());
+        syslog(LOG_WARNING, "Failed to configure device file as non-blocking: %s", file.c_str());
         throw std::runtime_error("Failed to configure device file as non-blocking: " + file);
     }
 
     if (libevdev_new_from_fd(fd, &dev) < 0) {
         close(fd);
-        syslog(LOG_ERR, "Failed to initialize libevdev for file: %s", file.c_str());
+        syslog(LOG_WARNING, "Failed to initialize libevdev for file: %s", file.c_str());
         throw std::runtime_error("Failed to initialize libevdev for file: " + file);
     }
 
     if (!libevdev_has_event_type(dev, EV_KEY)) {
         libevdev_free(dev);
         close(fd);
-        syslog(LOG_ERR, "Device does not support key events: %s", file.c_str());
+        syslog(LOG_WARNING, "Device does not support key events: %s", file.c_str());
         throw std::runtime_error("Device does not support key events: " + file);
     }
 
@@ -71,7 +71,7 @@ Device::Device(const std::string& file, const EventManager& manager, bool grab)
     ) {
         libevdev_free(dev);
         close(fd);
-        syslog(LOG_ERR, "Failed to create uinput device from: %s", file.c_str());
+        syslog(LOG_WARNING, "Failed to create uinput device from: %s", file.c_str());
         throw std::runtime_error("Failed to create uinput device from: " + file);
     }
 
@@ -79,19 +79,19 @@ Device::Device(const std::string& file, const EventManager& manager, bool grab)
         libevdev_uinput_destroy(uidev);
         libevdev_free(dev);
         close(fd);
-        syslog(LOG_ERR, "Failed to grab device: %s", file.c_str());
+        syslog(LOG_WARNING, "Failed to grab device: %s", file.c_str());
         throw std::runtime_error("Failed to grab device: " + file);
     }
 
     try {
         manager.addFd(fd, EPOLLIN | EPOLLPRI);
     } catch (const std::exception& e) {
-        syslog(LOG_ERR, "Failed to add device fd to EventManager: %s", e.what());
         libevdev_grab(dev, LIBEVDEV_UNGRAB);
         libevdev_uinput_destroy(uidev);
         libevdev_free(dev);
         close(fd);
-        throw;
+        syslog(LOG_WARNING, "Failed to add device fd to EventManager: %s", e.what());
+        throw std::runtime_error("Failed to add device fd to EventManager: " + std::string(e.what()));
     }
 };
 
