@@ -68,6 +68,7 @@ The install target places the daemon in `/usr/local/bin`, installs headers and t
 	"deviceFile": "auto",
 	"socketName": "hotkey-manager-ipc",
 	"passwordHash": "$argon2id$...",
+	"injectPasswordHash": "<hash-for-123456inject>",
 	"gamemodeHotkey": "",
 	"keyBinding": ""
 }
@@ -76,6 +77,7 @@ The install target places the daemon in `/usr/local/bin`, installs headers and t
 - `deviceFile`: set to a specific `/dev/input/eventX` if auto-detection fails, or a comma-separated list of devices (e.g., `/dev/input/event0,/dev/input/event1`) to monitor multiple keyboards
 - `socketName`: AF_UNIX abstract socket name exposed to clients (default `hotkey-manager-ipc`)
 - `passwordHash`: Argon2 hash used for client authentication
+- `injectPasswordHash`: Secondary Argon2 hash (default corresponds to `123456inject`) reserved for future injection workflows
 - `gamemodeHotkey`: empty string disables game mode; a valid hotkey cycles game mode through three states: default, ignore, bypass
 - Game mode states:
 	- `default`: hotkeys behave normally; grab/bypass follow each hotkey's own `passthrough` setting
@@ -98,7 +100,7 @@ Usage:
 | hotkey-manager-daemon | Start the daemon (Require ROOT) |
 | hotkey-manager-daemon hash <password> | Generate password hash for given password |
 | hotkey-manager-daemon keynames | List all available key names |
-| hotkey-manager-daemon set <field> <value> | Modify the config file (Require ROOT). Fields: `deviceFile`, `socketName`, `passwordHash`, `gamemodeHotkey`, `keyBinding`. |
+| hotkey-manager-daemon set <field> <value> | Modify the config file (Require ROOT). Fields: `deviceFile`, `socketName`, `passwordHash`, `injectPasswordHash`, `gamemodeHotkey`, `keyBinding`. |
 | hotkey-manager-daemon reset | Reset the config file to default values (Require ROOT). |
 
 For example, use `sudo hotkey-manager-daemon set passwordHash $(hotkey-manager-daemon hash <password>)` to change password
@@ -122,6 +124,22 @@ iface.mainloop();
 
 `mainloop` blocks and dispatches registered callbacks while handling keep-alives automatically.
 
+The client also supports active key injection through `inject`, which sends a synthetic key event request to the daemon:
+
+```cpp
+iface.inject("A");                    // press + release A
+iface.inject("LEFTCTRL+A");          // press chord, then release it
+iface.inject("LEFTSHIFT", "press"); // key-down only
+iface.inject("LEFTSHIFT", "release");
+iface.inject("ESC", "repeat");
+iface.inject("ENTER", "", 50, 25);  // wait 50 ms before starting, 25 ms after completion
+```
+
+- `key`: key name or key combination using the same grammar as hotkeys.
+- `action`: optional `press`, `release`, or `repeat`. When omitted, the daemon performs a full press/release sequence.
+- `beforeMs` / `afterMs`: optional delays in milliseconds applied before the whole injection operation starts and after the whole injection operation finishes.
+- When `action` is specified, use a single key. Combined keys are intended for the default press/release path.
+
 - Hotkey shortcut grammer: [here]()
 - Full API reference: [here]()
 
@@ -139,10 +157,24 @@ def on_hotkey():
 	print("shortcut triggered")
 
 manager.register_hotkey("Double(ESC)", on_hotkey)
+manager.inject("LEFTCTRL + LEFTALT + T")
 manager.mainloop()
 ```
 
 See `demo/client.py` for a more complete example, including cleanup helpers.
+
+Python `inject` mirrors the C++ API:
+
+```python
+manager.inject("A")
+manager.inject("LEFTSHIFT", action="press")
+manager.inject("LEFTSHIFT", action="release")
+manager.inject("ENTER", before_ms=50, after_ms=25)
+```
+
+- `key`: same key grammar accepted by hotkey registration.
+- `action`: optional `"press"`, `"release"`, or `"repeat"`.
+- `before_ms` / `after_ms`: optional integer delays in milliseconds applied before the whole injection starts and after it completes.
 
 ## Demos
 

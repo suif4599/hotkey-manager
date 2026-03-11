@@ -24,7 +24,8 @@ class HotkeyInterface {
     UnixDomainSocketClient client;
     Encryptor encryptor;
     std::string serverPublicKey;
-    mutable std::recursive_mutex interfaceMutex;
+    mutable std::mutex ioMutex;
+    mutable std::mutex callbackMutex;
 public:
     HotkeyInterface(const std::string& socketName = DEFAULT_SOCKET_NAME, int64_t timeoutMs = 5000);
     ~HotkeyInterface();
@@ -39,6 +40,7 @@ public:
     void deleteCallback(std::string functionId);
     void authenticate(const std::string& password);
     std::string formatHotkey(const std::string& hotkeyStr);
+    void inject(const std::string& key, const std::string& action = "", int beforeMs = 0, int afterMs = 0);
     void mainloop(std::function<bool()> keepRunning = []() {
         return true;
     });

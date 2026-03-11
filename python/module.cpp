@@ -21,6 +21,7 @@ static PyMethodDef hotkeyManagerInterfaceMethods[] = {
     {"register_hotkey", (PyCFunction)register_hotkey, METH_VARARGS | METH_KEYWORDS, HotkeyManagerInterface_register_hotkey_docstring},
     {"delete_hotkey", (PyCFunction)delete_hotkey, METH_VARARGS | METH_KEYWORDS, HotkeyManagerInterface_delete_hotkey_docstring},
     {"delete_callback", (PyCFunction)delete_callback, METH_VARARGS | METH_KEYWORDS, HotkeyManagerInterface_delete_callback_docstring},
+    {"inject", (PyCFunction)inject, METH_VARARGS | METH_KEYWORDS, HotkeyManagerInterface_inject_docstring},
     {"mainloop", (PyCFunction)mainloop, METH_VARARGS | METH_KEYWORDS, HotkeyManagerInterface_mainloop_docstring},
     {NULL}
 };

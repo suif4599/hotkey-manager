@@ -21,6 +21,7 @@ using namespace hotkey_manager;
 namespace hotkey_manager {
 
 static const char* DEFAULT_PASSWORD_HASH_STR = "$argon2id$v=19$m=65536,t=2,p=1$gVhSWbbAsC+mm2QfArc/xw$5fdVpc61mjx0xkbrMVi9YCXhIcl29h3fHvZkYO4TsIU";
+static const char* DEFAULT_INJECT_PASSWORD_HASH_STR = "$argon2id$v=19$m=65536,t=2,p=1$Y+Zs9UT5swsErlLIz3a4Aw$MnDWcndsQUOk40VC7FccphEwK6EOFuLhpNz7iff+MoA";
 static constexpr int INTERNAL_CLIENT_FD = -42;
 
 static void ensureParentDirExists(const std::filesystem::path& parent) {
@@ -45,9 +46,10 @@ static std::string defaultConfigPayload() {
         + "    \"deviceFile\": \"auto\",\n"
         + "    \"socketName\": \"" DEFAULT_SOCKET_NAME "\",\n"
         + "    \"passwordHash\": \"" + std::string(DEFAULT_PASSWORD_HASH_STR) + "\",\n"
+        + "    \"injectPasswordHash\": \"" + std::string(DEFAULT_INJECT_PASSWORD_HASH_STR) + "\",\n"
         + "    \"gamemodeHotkey\": \"\",\n"
         + "    \"keyBinding\": \"\"\n"
-        + "}\n"; // default password: 123456
+        + "}\n"; // default passwords: passwordHash=123456, injectPasswordHash=123456inject
 }
 
 static void writeDefaultConfigFile(const std::string& filePath, bool overwrite) {
@@ -138,6 +140,13 @@ void HotkeyManagerConfig::parseConfig(const std::string& content) {
         return it->second;
     };
 
+    auto getOrDefault = [&](const char* key, const std::string& fallback) -> std::string {
+        auto it = kv.find(key);
+        if (it == kv.end())
+            return fallback;
+        return it->second;
+    };
+
     deviceFileRaw = getRequired("deviceFile");
     if (deviceFileRaw == "auto")
         deviceFileResolved = Device::autoDetectDeviceFile();
@@ -146,6 +155,7 @@ void HotkeyManagerConfig::parseConfig(const std::string& content) {
 
     socketName = getRequired("socketName");
     passwordHash = getRequired("passwordHash");
+    injectPasswordHash = getOrDefault("injectPasswordHash", DEFAULT_INJECT_PASSWORD_HASH_STR);
     gamemodeHotkey = getRequired("gamemodeHotkey");
     keyBinding = getRequired("keyBinding");
 }
@@ -195,8 +205,8 @@ HotkeyManagerConfig::HotkeyManagerConfig(const std::string& filePath)
     parseConfig(content);
     setSecurePermissions();
     syslog(LOG_INFO, "Using config file: %s", configFile.c_str());
-    syslog(LOG_INFO, "Config loaded: deviceFile=%s, socketName=%s, passwordHash=%s",
-        deviceFileRaw.c_str(), socketName.c_str(), passwordHash.c_str());
+    syslog(LOG_INFO, "Config loaded: deviceFile=%s, socketName=%s, passwordHash=%s, injectPasswordHash=%s",
+        deviceFileRaw.c_str(), socketName.c_str(), passwordHash.c_str(), injectPasswordHash.c_str());
     if (deviceFileRaw == "auto") {
         syslog(LOG_INFO, "Auto-detected deviceFile resolved to: %s", deviceFileResolved.c_str());
     }
@@ -219,6 +229,8 @@ std::string& HotkeyManagerConfig::operator[](const std::string& key) {
         return socketName;
     else if (key == "passwordHash")
         return passwordHash;
+    else if (key == "injectPasswordHash")
+        return injectPasswordHash;
     else if (key == "gamemodeHotkey")
         return gamemodeHotkey;
     else if (key == "keyBinding")
@@ -235,6 +247,8 @@ const std::string& HotkeyManagerConfig::operator[](const std::string& key) const
         return socketName;
     else if (key == "passwordHash")
         return passwordHash;
+    else if (key == "injectPasswordHash")
+        return injectPasswordHash;
     else if (key == "gamemodeHotkey")
         return gamemodeHotkey;
     else if (key == "keyBinding")
@@ -270,6 +284,7 @@ void HotkeyManagerConfig::save() const {
             << "    \"deviceFile\": \"" << deviceFileRaw << "\",\n"
             << "    \"socketName\": \"" << socketName << "\",\n"
             << "    \"passwordHash\": \"" << passwordHash << "\",\n"
+            << "    \"injectPasswordHash\": \"" << injectPasswordHash << "\",\n"
             << "    \"gamemodeHotkey\": \"" << gamemodeHotkey << "\",\n"
             << "    \"keyBinding\": \"" << keyBinding << "\"\n"
             << "}\n";
@@ -289,12 +304,14 @@ HotkeyManager::HotkeyManager(
     const std::string& file,
     const std::string& socketName,
     const std::string& passwordHash,
+    const std::string& injectPasswordHash,
     const std::string& gamemodeHotkey,
     const std::string& keyBinding,
     bool grabDevice
 ): sessionMap()
 , hotkeyMap()
 , eventManager()
+, pendingEvents()
 , devices()
 , grabDevice(grabDevice)
 , gamemode(0)
@@ -306,10 +323,11 @@ HotkeyManager::HotkeyManager(
 , internalSession(nullptr)
 , server(socketName, eventManager)
 , encryptor()
+, passwordHash(passwordHash)
+, injectPasswordHash(injectPasswordHash)
 , commands()
 , deleteWaitlist()
 , lastKeepAliveTimestamps()
-, passwordHash(passwordHash)
 , pidSessionCounts()
 , notificationManager(NOTIFICATION_APP_NAME, NOTIFICATION_ICON_NAME) {
     commands["RegisterPublicKey"] = [this](int clientFd, const std::string& args) {
@@ -332,6 +350,9 @@ HotkeyManager::HotkeyManager(
     };
     commands["FormatHotkey"] = [this](int clientFd, const std::string& args) {
         return commandFormatHotkey(clientFd, args);
+    };
+    commands["Inject"] = [this](int clientFd, const std::string& args) {
+        return commandInject(clientFd, args);
     };
 
     // Initialize devices
@@ -379,7 +400,7 @@ HotkeyManager::HotkeyManager(
 
     if (!gamemodeHotkey.empty()) {
         internalClientInfo = std::make_unique<ClientInfo>(internalClientFd, "0:0:0");
-        internalSession = new Session(internalClientInfo.get());
+        internalSession = new Session(*internalClientInfo);
         internalSession->authenticate();
         sessionMap[internalClientFd] = internalSession;
         std::string response = commandRegisterHotkey(internalClientFd, gamemodeHotkey + "; true"); // No callback
@@ -447,6 +468,7 @@ HotkeyManager& HotkeyManager::getInstance(
         config.resolvedDeviceFile(),
         config["socketName"],
         config["passwordHash"],
+        config["injectPasswordHash"],
         config["gamemodeHotkey"],
         config["keyBinding"],
         grabDevice
@@ -468,6 +490,7 @@ HotkeyManager::~HotkeyManager() {
 void HotkeyManager::mainloop() {
     syslog(LOG_INFO, "HotkeyManager mainloop started.");
     int64_t lastTime = 0;
+    int64_t lastPendingEventTime = 0;
     int64_t minimalTimeSession = std::numeric_limits<int64_t>::max(); // Minimal timestamp to check for session timeouts
     int64_t minimalTimeNotification = std::numeric_limits<int64_t>::max(); // Minimal timestamp to check for notification expirations
     while (true) {
@@ -500,11 +523,34 @@ void HotkeyManager::mainloop() {
                     timeoutMs = static_cast<int>(delta);
             }
         }
+        if (!pendingEvents.empty()) {
+            size_t i = 0;
+            for (; i < pendingEvents.size(); ++i) {
+                auto& [eventPtr, deviceIndex, beforeMs, AfterMs] = pendingEvents[i];
+                int64_t delta = lastPendingEventTime + beforeMs - now;
+                if (delta > 0) {
+                    if (timeoutMs == -1 || delta < timeoutMs)
+                        timeoutMs = static_cast<int>(delta);
+                    break;
+                }
+                lastPendingEventTime = now + AfterMs;
+                if (deviceIndex == -1) {
+                    auto& devicePtr = devices[0];
+                    devicePtr->passThroughEvent(*eventPtr);
+                } else {
+                    auto& devicePtr = devices[deviceIndex];
+                    devicePtr->passThroughEvent(*eventPtr);
+                }
+                delete eventPtr;
+            }
+            pendingEvents.erase(pendingEvents.begin(), pendingEvents.begin() + i);
+        }
         auto [events, n] = eventManager.wait(timeoutMs);
         if (n > 0) {
             // Handle new keyboard events
             Event* ev;
-            for (auto& devicePtr : devices) {
+            for (int i = 0; i < devices.size(); ++i) {
+                auto& devicePtr = devices[i];
                 while (ev = devicePtr->next()) {
                     bool suppressed = false;
                     if (ev->get_type() == 2 && ev->get_key() == gamemodeKey)
@@ -541,7 +587,8 @@ void HotkeyManager::mainloop() {
                         }
                     }
                     if (grabDevice && !suppressed)
-                        devicePtr->passThroughEvent(*ev);
+                        pendingEvents.emplace_back(new Event(*ev), i, 0, 0);
+                        // devicePtr->passThroughEvent(*ev);
                     delete ev;
                 }
             }
@@ -583,7 +630,7 @@ void HotkeyManager::mainloop() {
                     it->second--;
                     continue;
                 }
-                sessionMap[newClient->getFd()] = new Session(newClient);
+                sessionMap[newClient->getFd()] = new Session(*newClient);
                 int64_t now = getTimestampMs();
                 lastKeepAliveTimestamps[sessionMap[newClient->getFd()]] = now;
                 minimalTimeSession = std::min(minimalTimeSession, now);
@@ -692,11 +739,14 @@ std::string HotkeyManager::commandAuthenticate(int clientFd, const std::string& 
                clientFd, processInfo.c_str());
         return "[Error]: Process info mismatch";
     }
-    if (!Encryptor::verifyPassword(hash, passwordHash)) {
+    if (Encryptor::verifyPassword(hash, injectPasswordHash)) {
+        sessionMap[clientFd]->authenticate(true);
+    } else if (Encryptor::verifyPassword(hash, passwordHash)) {
+        sessionMap[clientFd]->authenticate();
+    } else {
         syslog(LOG_NOTICE, "Authentication failed for clientFd=%d", clientFd);
         return "[Error]: Authentication failed";
     }
-    sessionMap[clientFd]->authenticate();
     return "[OK]";
 }
 
@@ -816,6 +866,94 @@ std::string HotkeyManager::commandFormatHotkey(int clientFd, const std::string& 
         syslog(LOG_NOTICE, "Failed to format hotkey for clientFd=%d: %s", clientFd, e.what());
         return std::string("[Error]: Invalid hotkey format: ") + e.what();
     }
+}
+
+std::string HotkeyManager::commandInject(int clientFd, const std::string& args) {
+    static const std::regex injectRe {"^((press|release|repeat):)?([A-Za-z0-9_+]+)(\\s*,\\s*(\\d+)\\s*,\\s*(\\d+))?$"};
+    if (!sessionMap[clientFd]->isAuthenticated()) {
+        syslog(LOG_NOTICE, "ClientFd=%d attempted to send Inject without authentication", clientFd);
+        deleteWaitlist.push_back(clientFd);
+        return "[Error]: Not authenticated";
+    }
+    if (!sessionMap[clientFd]->canInject()) {
+        syslog(LOG_WARNING, "ClientFd=%d attempted to send Inject without injection permission", clientFd);
+        return "[Error]: Injection permission denied";
+    }
+
+    std::smatch match;
+    if (!std::regex_match(args, match, injectRe)) {
+        syslog(LOG_NOTICE, "Invalid Inject arguments from clientFd=%d: %s", clientFd, args.c_str());
+        return "[Error]: Invalid Inject arguments, expected format Inject([press|release|repeat:]<key>[, <delayBeforeMs>, <delayAfterMs>])";
+    }
+    std::string actionStr, keyStr, delayBeforeStr, delayAfterStr;
+    if (match[2].matched)
+        actionStr = match[2];
+    else
+        actionStr = "click";
+    keyStr = match[3];
+    if (match[5].matched)
+        delayBeforeStr = match[5];
+    else
+        delayBeforeStr = "0";
+    if (match[6].matched)
+        delayAfterStr = match[6];
+    else
+        delayAfterStr = "0";
+    int delayBefore, delayAfter;
+    try {
+        delayBefore = std::stoi(delayBeforeStr);
+        delayAfter = std::stoi(delayAfterStr);
+    } catch (const std::exception& e) {
+        syslog(LOG_NOTICE, "Invalid delay values in Inject command from clientFd=%d: %s", clientFd, args.c_str());
+        return "[Error]: Invalid delay values, must be integers";
+    }
+
+    if (actionStr == "click") {
+        // Allow "+" to connect key combinations
+        std::vector<std::string> keys;
+        size_t start = 0;
+        size_t end;
+        keyStr.erase(std::remove_if(keyStr.begin(), keyStr.end(), ::isspace), keyStr.end());
+        while ((end = keyStr.find('+', start)) != std::string::npos) {
+            keys.push_back(keyStr.substr(start, end - start));
+            start = end + 1;
+        }
+        keys.push_back(keyStr.substr(start));
+        std::vector<int> keyCodes;
+        try {
+            for (const std::string& k : keys) {
+                int keyCode = KeyMapper::getInstance()[k];
+                keyCodes.push_back(keyCode);
+            }
+        } catch (const std::exception& e) {
+            syslog(LOG_NOTICE, "Invalid key in Inject command from clientFd=%d: %s", clientFd, e.what());
+            return std::string("[Error]: Invalid key: ") + e.what();
+        }
+        for (int keyCode : keyCodes)
+            pendingEvents.emplace_back(new PressEvent(keyCode), -1, delayBefore, 0);
+        for (int keyCode : keyCodes)
+            pendingEvents.emplace_back(new ReleaseEvent(keyCode), -1, CLICK_ACTION_DURATION_MS, delayAfter);
+        return "[OK]";
+    }
+    // Single key action
+    int keyCode;
+    try {
+        keyCode = KeyMapper::getInstance()[keyStr];
+    } catch (const std::exception& e) {
+        syslog(LOG_NOTICE, "Invalid key in Inject command from clientFd=%d: %s", clientFd, e.what());
+        return std::string("[Error]: Invalid key: ") + e.what();
+    }
+    if (actionStr == "press") {
+        pendingEvents.emplace_back(new PressEvent(keyCode), -1, delayBefore, delayAfter);
+    } else if (actionStr == "release") {
+        pendingEvents.emplace_back(new ReleaseEvent(keyCode), -1, delayBefore, delayAfter);
+    } else if (actionStr == "repeat") {
+        pendingEvents.emplace_back(new RepeatEvent(keyCode), -1, delayBefore, delayAfter);
+    } else {
+        syslog(LOG_NOTICE, "Invalid action in Inject command from clientFd=%d: %s", clientFd, actionStr.c_str());
+        return "[Error]: Invalid action, must be one of press, release, repeat, or click";
+    }
+    return "[OK]";
 }
 
 } // namespace hotkey_manager

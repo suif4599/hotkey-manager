@@ -60,9 +60,8 @@ Updates the configuration file in place.  This subcommand requires root
 privileges.  Supported fields are
 .BR deviceFile ,
 .BR socketName ,
-and
 .BR passwordHash ,
-and
+.BR injectPasswordHash ,
 .BR gamemodeHotkey ,
 and
 .BR keyBinding .
@@ -72,8 +71,9 @@ editing.
 .B reset
 Rewrites the configuration file to default values (requires root). Existing
 content is replaced with the same defaults used on first start: deviceFile
-`auto`, socketName `hotkey-manager-ipc`, the bundled Argon2 password hash, and
-an empty gamemodeHotkey and keyBinding. No backup is created.
+`auto`, socketName `hotkey-manager-ipc`, the bundled Argon2 password hash,
+the bundled injectPasswordHash, and an empty gamemodeHotkey and keyBinding.
+No backup is created.
 .TP
 .B --help
 Displays a usage summary and a sample configuration block.
@@ -98,6 +98,7 @@ permissions (0600) containing:
     "deviceFile": "auto",
     "socketName": "hotkey-manager-ipc",
     "passwordHash": "$argon2id$...",
+    "injectPasswordHash": "<hash-for-123456inject>",
     "gamemodeHotkey": "",
     "keyBinding": ""
 }
@@ -119,6 +120,11 @@ SO_PEERCRED checks to verify peers.
 .IP \(bu 2
 .B passwordHash
 stores the Argon2id hash clients must satisfy during authentication.
+.IP \(bu 2
+.B injectPasswordHash
+stores an additional Argon2id hash (default corresponds to the literal password
+.I 123456inject
+) reserved for future injection workflows.
 .IP \(bu 2
 .B gamemodeHotkey
 sets a hotkey that toggles game mode on/off. Use an empty string to disable it.
@@ -148,6 +154,7 @@ Accepts client connections and validates Linux peer credentials via
 .IP \(bu 2
 Performs a libsodium key exchange, then expects encrypted commands such as
 .BR RegisterHotkey ,
+.BR Inject ,
 .BR KeepAlive ,
 and
 .BR CloseSession .

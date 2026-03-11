@@ -9,30 +9,29 @@ namespace hotkey_manager {
 class Event {
 protected:
     key_t key;
+    int type; // 1: Press, 2: Release, 3: Repeat
 public:
-    explicit Event(key_t k): key(k) {}
+    explicit Event(key_t k, int t): key(k), type(t) {}
+    explicit Event(const Event& other): key(other.key), type(other.type) {}
     virtual ~Event() = default;
     key_t get_key() const { return key; }
-    virtual int get_type() const = 0;
+    int get_type() const { return type; }
     friend std::ostream& operator<<(std::ostream& os, const Event& ev);
 };
 
 class PressEvent : public Event {
 public:
-    explicit PressEvent(key_t k): Event(k) {}
-    int get_type() const override { return 1; }
+    explicit PressEvent(key_t k): Event(k, 1) {}
 };
 
 class ReleaseEvent : public Event {
 public:
-    explicit ReleaseEvent(key_t k): Event(k) {}
-    int get_type() const override { return 2; }
+    explicit ReleaseEvent(key_t k): Event(k, 2) {}
 };
 
 class RepeatEvent : public Event {
 public:
-    explicit RepeatEvent(key_t k): Event(k) {}
-    int get_type() const override { return 3; }
+    explicit RepeatEvent(key_t k): Event(k, 3) {}
 };
 
 } // namespace hotkey_manager

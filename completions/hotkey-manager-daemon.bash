@@ -8,7 +8,7 @@ _hotkey_manager_daemon()
 
     case "${prev}" in
         set)
-            local fields="deviceFile socketName passwordHash gamemodeHotkey keyBinding"
+            local fields="deviceFile socketName passwordHash injectPasswordHash gamemodeHotkey keyBinding"
             COMPREPLY=( $(compgen -W "${fields}" -- "${cur}") )
             return 0
             ;;

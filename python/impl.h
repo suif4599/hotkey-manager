@@ -31,6 +31,7 @@ extern "C" PyObject* authenticate(HotkeyManagerInterfaceObject* self, PyObject* 
 extern "C" PyObject* register_hotkey(HotkeyManagerInterfaceObject* self, PyObject* args, PyObject* kwargs);
 extern "C" PyObject* delete_hotkey(HotkeyManagerInterfaceObject* self, PyObject* args, PyObject* kwargs);
 extern "C" PyObject* delete_callback(HotkeyManagerInterfaceObject* self, PyObject* args, PyObject* kwargs);
+extern "C" PyObject* inject(HotkeyManagerInterfaceObject* self, PyObject* args, PyObject* kwargs);
 extern "C" PyObject* mainloop(HotkeyManagerInterfaceObject* self, PyObject* args, PyObject* kwargs);
 
 extern const char* HotkeyManagerModule_docstring;
@@ -42,6 +43,7 @@ extern const char* HotkeyManagerInterface_authenticate_docstring;
 extern const char* HotkeyManagerInterface_register_hotkey_docstring;
 extern const char* HotkeyManagerInterface_delete_hotkey_docstring;
 extern const char* HotkeyManagerInterface_delete_callback_docstring;
+extern const char* HotkeyManagerInterface_inject_docstring;
 extern const char* HotkeyManagerInterface_mainloop_docstring;
 
 } // namespace hotkey_manager

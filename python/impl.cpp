@@ -419,6 +419,81 @@ extern "C" PyObject* delete_callback(HotkeyManagerInterfaceObject* self, PyObjec
     Py_RETURN_NONE;
 }
 
+extern "C" PyObject* inject(HotkeyManagerInterfaceObject* self, PyObject* args, PyObject* kwargs) {
+    PyObject* keyObj = nullptr;
+    PyObject* actionObj = nullptr;
+    PyObject* beforeMsObj = nullptr;
+    PyObject* afterMsObj = nullptr;
+    static char kw_key[] = "key";
+    static char kw_action[] = "action";
+    static char kw_before_ms[] = "before_ms";
+    static char kw_after_ms[] = "after_ms";
+    static char* kwlist[] = {kw_key, kw_action, kw_before_ms, kw_after_ms, nullptr};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|OOO", kwlist, &keyObj, &actionObj, &beforeMsObj, &afterMsObj))
+        return nullptr;
+
+    if (!PyUnicode_Check(keyObj)) {
+        PyErr_SetString(PyExc_TypeError, "key must be a string");
+        return nullptr;
+    }
+    std::string keyUtf8;
+    if (!UnicodeToUtf8(keyObj, keyUtf8))
+        return nullptr;
+
+     // action is optional
+    std::string actionStr;
+    if (actionObj != nullptr && actionObj != Py_None) {
+        if (!PyUnicode_Check(actionObj)) {
+            PyErr_SetString(PyExc_TypeError, "action must be a string");
+            return nullptr;
+        }
+        if (!UnicodeToUtf8(actionObj, actionStr))
+            return nullptr;
+        if (actionStr != "press" && actionStr != "release" && actionStr != "repeat") {
+            PyErr_SetString(PyExc_TypeError, "action must be 'press', 'release' or 'repeat'");
+            return nullptr;
+        }
+    }
+
+    long beforeMs = 0;
+    long afterMs = 0;
+    if (beforeMsObj != nullptr) {
+        if (!PyLong_Check(beforeMsObj)) {
+            PyErr_SetString(PyExc_TypeError, "before_ms must be an integer");
+            return nullptr;
+        }
+        beforeMs = PyLong_AsLong(beforeMsObj);
+        if (PyErr_Occurred())
+            return nullptr;
+    }
+    if (afterMsObj != nullptr) {
+        if (!PyLong_Check(afterMsObj)) {
+            PyErr_SetString(PyExc_TypeError, "after_ms must be an integer");
+            return nullptr;
+        }
+        afterMs = PyLong_AsLong(afterMsObj);
+        if (PyErr_Occurred())
+            return nullptr;
+    }
+
+    // Do Cpp call
+    PyThreadState* threadState = PyEval_SaveThread();
+    std::string errorMessage;
+    bool failed = false;
+    try {
+        self->hotkeyInterface->inject(keyUtf8, actionStr, beforeMs, afterMs);
+    } catch (const std::exception& e) {
+        failed = true;
+        errorMessage = e.what();
+    }
+    PyEval_RestoreThread(threadState);
+    if (failed) {
+        PyErr_SetString(PyExc_RuntimeError, errorMessage.c_str());
+        return nullptr;
+    }
+    Py_RETURN_NONE;
+}
+
 extern "C" PyObject* mainloop(HotkeyManagerInterfaceObject* self, PyObject* args, PyObject* kwargs) {
     // No argumentssystemd-ask-password
     PyObject* keepRunningObj = nullptr;
@@ -605,6 +680,32 @@ const char* HotkeyManagerInterface_delete_callback_docstring = \
     "------\n"\
     "RuntimeError\n"\
     "    Raised when the callback is unknown for this session.";
+const char* HotkeyManagerInterface_inject_docstring = \
+    "inject($self, key: str, action: Optional[str] = None, before_ms: int = 0, after_ms: int = 0)\n"\
+    "--\n"\
+    "\n"\
+    "Simulate key events by injecting them into the OS input stream via the daemon.\n"\
+    "The key string uses the same grammar as hotkey expressions. The optional action\n"\
+    "specifies whether this is a 'press', 'release', or 'repeat' event (default is\n"\
+    "'press' followed by 'release'). before_ms and after_ms introduce delays before\n"\
+    "the whole injection operation starts and after the whole injection operation\n"\
+    "completes, respectively.\n"\
+    "\n"\
+    "Parameters\n"\
+    "----------\n"\
+    "key: str\n"\
+    "    Key expression to inject (e.g. 'LEFTCTRL', 'LEFTALT + A'). Multiple keys are supported only if action is None.\n"\
+    "action: Optional[str]\n"\
+    "    If specified, must be 'press', 'release', or 'repeat' to indicate the type of event.\n"\
+    "before_ms: int, default 0\n"\
+    "    Milliseconds to wait before starting the injection operation.\n"\
+    "after_ms: int, default 0\n"\
+    "    Milliseconds to wait after the injection operation completes.\n"\
+    "\n"\
+    "Raises\n"\
+    "------\n"\
+    "RuntimeError\n"\
+    "    Raised if the key expression is invalid or the session is not authenticated.";
 const char* HotkeyManagerInterface_mainloop_docstring = \
     "mainloop($self, keep_running: Optional[Callable[[], bool]] = None)\n"\
     "--\n"\

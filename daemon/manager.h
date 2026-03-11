@@ -29,6 +29,10 @@ namespace hotkey_manager {
 // (Encrypted) KeepAlive() -> "[OK]" / "[Error]: ..."; Error only if not authenticated
 // (Encrypted) CloseSession() -> "[OK]"
 // (Encrypted) FormatHotkey() -> "[OK]: hotkeyStr"
+// (Encrypted) Inject([action:]key[, beforeMs, afterMs]) -> "[OK]" / "[Error]: ..."; Only allowed for sessions authenticated with inject password
+//             - key: Use "+" to connect multiple keys, e.g. "LEFTCTRL+C"
+//             - beforeMs, afterMs: Optional, default to 0.
+//             - action: "press", "release" or "repeat". If specified, multiple keys are not allowed
 
 // Responses:
 // (Text) publicKey
@@ -42,6 +46,7 @@ class HotkeyManagerConfig {
     std::string deviceFileResolved;
     std::string socketName;
     std::string passwordHash;
+    std::string injectPasswordHash;
     std::string keyBinding;
     std::string gamemodeHotkey;
     static bool isAsciiPath(const std::string& path);
@@ -68,6 +73,7 @@ class HotkeyManager {
     std::map<int, Session*> sessionMap; // Maintain life cycle of Session*
     std::unordered_map<Condition*, std::vector<std::pair<Session*, bool>>> hotkeyMap; // Borrow Session*, Maintain Condition*
     EventManager eventManager;
+    std::vector<std::tuple<Event*, int, int, int>> pendingEvents; // (Event*, deviceIndex, beforeMs, AfterMs), deviceIndex can be -1
     std::vector<std::unique_ptr<Device>> devices;
     bool grabDevice;
     int gamemode; // 0: Off(default), 1: On(ignore), 2: On(bypass)
@@ -80,6 +86,7 @@ class HotkeyManager {
     UnixDomainSocketServer server;
     Encryptor encryptor;
     std::string passwordHash;
+    std::string injectPasswordHash;
     std::map<std::string, std::function<std::string(int, const std::string&)>> commands;
     std::vector<int> deleteWaitlist; // Send Response and then delete session
     std::map<Session*, int64_t> lastKeepAliveTimestamps;
@@ -93,10 +100,12 @@ class HotkeyManager {
     std::string commandKeepAlive(int clientFd, const std::string& args);
     std::string commandCloseSession(int clientFd, const std::string& args);
     std::string commandFormatHotkey(int clientFd, const std::string& args);
+    std::string commandInject(int clientFd, const std::string& args);
     HotkeyManager(
         const std::string& file,
         const std::string& socketName,
         const std::string& passwordHash,
+        const std::string& injectPasswordHash,
         const std::string& gamemodeHotkey,
         const std::string& keyBinding,
         bool grabDevice

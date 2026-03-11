@@ -88,12 +88,16 @@ Register one or more hotkeys via
 .BR registerHotkey () ,
 capturing callbacks to execute when the daemon notifies the client.
 .IP 4. 3
+Optionally emit synthetic key events with
+.BR inject ()
+when the application needs to drive keyboard input through the daemon.
+.IP 5. 3
 Run
 .BR mainloop ()
 to deliver events.  Provide a custom
 .I keepRunning
 callable when integrating with an external event loop.
-.IP 5. 3
+.IP 6. 3
 On shutdown remove callbacks with
 .BR deleteHotkey ()
 or allow the destructor to send
@@ -137,6 +141,22 @@ When the last callback for a hotkey disappears the daemon mapping is cleared.
 Requests canonical formatting from the daemon without registering the hotkey.
 Useful for validating user input or persisting normalized strings.
 .TP
+.BI "void inject(const std::string& " key ", const std::string& " action " = \"\", int " beforeMs " = 0, int " afterMs " = 0)"
+Requests synthetic keyboard input through the daemon.  When
+.I action
+is empty, the daemon performs a full press/release sequence for
+.IR key .
+Supported explicit actions are
+.BR press ,
+.BR release ,
+and
+.BR repeat .
+.I beforeMs
+adds a delay before the injection operation begins and
+.I afterMs
+adds a delay after the injection operation completes.  Combined keys are intended for the
+default press/release path.
+.TP
 .BI "void mainloop(std::function<bool()> " keepRunning " = []{ return true; })"
 Runs the event loop, delivering callbacks and issuing
 .SM KeepAlive
@@ -150,9 +170,9 @@ returns false or an exception occurs.
 Returns a const reference to the internal callback registry for inspection.
 
 .PP
-All member functions are thread-safe through an internal recursive mutex.  The
-class may be destroyed from any thread; destruction attempts to close the
-session gracefully.
+Public member functions are internally synchronized so callback management and
+socket I/O can proceed safely across threads.  The class may be destroyed from
+any thread; destruction attempts to close the session gracefully.
 
 .SH ERROR HANDLING
 The library reports failures via C++ exceptions.  Common messages include:
@@ -167,6 +187,10 @@ untrusted process.
 .B "Failed to register hotkey: ..."
 The daemon rejected the expression (syntax error, unknown key name, or missing
 authentication).
+.TP
+.B "Failed to inject key: ..."
+The daemon rejected the requested synthetic key event, typically because the
+expression was invalid or the session was not authenticated.
 .TP
 .B "Duplicate functionId '...'"
 The caller provided a non\-unique identifier when registering callbacks.
@@ -197,6 +221,8 @@ int main() {
     iface.registerHotkey("Double(ESC)", [] {
         std::puts("ESC pressed twice");
     });
+
+    iface.inject("ENTER", "", 20, 20);
 
     iface.mainloop();
 }

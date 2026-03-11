@@ -11,13 +11,15 @@ Session::Session() {
     throw std::runtime_error("Default constructor not allowed");
 }
 
-Session::Session(ClientInfo* info)
-: clientInfo(info)
+Session::Session(const ClientInfo& info)
+: fd(info.getFd())
+, processInfo(info.getProcessInfo())
 , publicKey()
-, authenticated(false) {}
+, authenticated(false)
+, allowInject(false) {}
 
 bool Session::checkProcessInfo(const std::string& processInfo) const {
-    return clientInfo->getProcessInfo() == processInfo;
+    return this->processInfo == processInfo;
 }
 
 bool Session::setPublicKey(const std::string& key) {
@@ -27,16 +29,21 @@ bool Session::setPublicKey(const std::string& key) {
     return true;
 }
 
-void Session::authenticate() {
+void Session::authenticate(bool allowInject) {
     authenticated = true;
+    this->allowInject = allowInject;
 }
 
 bool Session::isAuthenticated() const {
     return authenticated;
 }
 
+bool Session::canInject() const {
+    return allowInject;
+}
+
 int Session::getFd() const {
-    return clientInfo->getFd();
+    return fd;
 }
 
 std::string Session::getPublicKey() const {
@@ -44,9 +51,7 @@ std::string Session::getPublicKey() const {
 }
 
 int Session::getPid() const {
-    return std::stoi(
-        clientInfo->getProcessInfo().substr(0, clientInfo->getProcessInfo().find(':'))
-    );
+    return std::stoi(processInfo.substr(0, processInfo.find(':')));
 }
 
 } // namespace hotkey_manager
