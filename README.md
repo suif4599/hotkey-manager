@@ -132,12 +132,14 @@ iface.inject("LEFTCTRL+A");          // press chord, then release it
 iface.inject("LEFTSHIFT", "press"); // key-down only
 iface.inject("LEFTSHIFT", "release");
 iface.inject("ESC", "repeat");
-iface.inject("ENTER", "", 50, 25);  // wait 50 ms before starting, 25 ms after completion
+iface.inject("ENTER");               // default action: press + release
+iface.inject("TAB", "press", 0, 0, false); // non-blocking, returns immediately
 ```
 
 - `key`: key name or key combination using the same grammar as hotkeys.
 - `action`: optional `press`, `release`, or `repeat`. When omitted, the daemon performs a full press/release sequence.
 - `beforeMs` / `afterMs`: optional delays in milliseconds applied before the whole injection operation starts and after the whole injection operation finishes.
+- `block`: optional boolean (default `true`). `true` waits until injection completes; `false` returns immediately after submitting the request.
 - When `action` is specified, use a single key. Combined keys are intended for the default press/release path.
 
 - Hotkey shortcut grammer: [here]()
@@ -170,11 +172,13 @@ manager.inject("A")
 manager.inject("LEFTSHIFT", action="press")
 manager.inject("LEFTSHIFT", action="release")
 manager.inject("ENTER", before_ms=50, after_ms=25)
+manager.inject("TAB", block=False)
 ```
 
 - `key`: same key grammar accepted by hotkey registration.
-- `action`: optional `"press"`, `"release"`, or `"repeat"`.
+- `action`: optional `"press"`, `"release"`, or `"repeat"`; use `None` for default behavior.
 - `before_ms` / `after_ms`: optional integer delays in milliseconds applied before the whole injection starts and after it completes.
+- `block`: optional boolean, default `True`. `True` waits for completion; `False` returns immediately.
 
 ## Demos
 

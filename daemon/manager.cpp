@@ -535,6 +535,20 @@ void HotkeyManager::mainloop() {
                 }
                 lastPendingEventTime = now + AfterMs;
                 if (deviceIndex == -1) {
+                    key_t key = eventPtr->get_key();
+                    if (key < 0) {
+                        // Send "[OK]" response
+                        int clientFd = -eventPtr->get_key() - 1;
+                        server.sendResponse(
+                            clientFd,
+                            encryptor.encrypt("[OK]", sessionMap[clientFd]->getPublicKey())
+                        );
+                        delete eventPtr;
+                        continue;
+                    } else if (key == 0) {
+                        delete eventPtr;
+                        continue;
+                    }
                     auto& devicePtr = devices[0];
                     devicePtr->passThroughEvent(*eventPtr);
                 } else {
@@ -698,6 +712,8 @@ void HotkeyManager::execute(int clientFd, const std::string& command) {
     auto it = commands.find(cmdName);
     if (it != commands.end()) {
         std::string response = it->second(clientFd, cmdArgs);
+        if (response.empty())
+            return; // Suppress response if empty
         server.sendResponse(
             clientFd,
             encryptor.encrypt(response, sessionMap[clientFd]->getPublicKey())
@@ -869,7 +885,7 @@ std::string HotkeyManager::commandFormatHotkey(int clientFd, const std::string& 
 }
 
 std::string HotkeyManager::commandInject(int clientFd, const std::string& args) {
-    static const std::regex injectRe {"^((press|release|repeat):)?([A-Za-z0-9_+]+)(\\s*,\\s*(\\d+)\\s*,\\s*(\\d+))?$"};
+    static const std::regex injectRe {"^(/)?((press|release|repeat):)?([A-Za-z0-9_+]+)(\\s*,\\s*(\\d+)\\s*,\\s*(\\d+))?$"};
     if (!sessionMap[clientFd]->isAuthenticated()) {
         syslog(LOG_NOTICE, "ClientFd=%d attempted to send Inject without authentication", clientFd);
         deleteWaitlist.push_back(clientFd);
@@ -886,17 +902,18 @@ std::string HotkeyManager::commandInject(int clientFd, const std::string& args) 
         return "[Error]: Invalid Inject arguments, expected format Inject([press|release|repeat:]<key>[, <delayBeforeMs>, <delayAfterMs>])";
     }
     std::string actionStr, keyStr, delayBeforeStr, delayAfterStr;
-    if (match[2].matched)
-        actionStr = match[2];
+    bool block = match[1].matched;
+    if (match[3].matched)
+        actionStr = match[3];
     else
         actionStr = "click";
-    keyStr = match[3];
-    if (match[5].matched)
-        delayBeforeStr = match[5];
+    keyStr = match[4];
+    if (match[6].matched)
+        delayBeforeStr = match[6];
     else
         delayBeforeStr = "0";
-    if (match[6].matched)
-        delayAfterStr = match[6];
+    if (match[7].matched)
+        delayAfterStr = match[7];
     else
         delayAfterStr = "0";
     int delayBefore, delayAfter;
@@ -929,11 +946,26 @@ std::string HotkeyManager::commandInject(int clientFd, const std::string& args) 
             syslog(LOG_NOTICE, "Invalid key in Inject command from clientFd=%d: %s", clientFd, e.what());
             return std::string("[Error]: Invalid key: ") + e.what();
         }
-        for (int keyCode : keyCodes)
+        if (!block) {
+            // Response before injecting
+            pendingEvents.emplace_back(new RepeatEvent(-clientFd - 1), -1, 0, 0); // Dummy event to trigger response sending
+        }
+        pendingEvents.emplace_back(new RepeatEvent(KEY_RESERVED), -1, 0, 0); // update lastPendingEventTime
+        for (int keyCode : keyCodes){
             pendingEvents.emplace_back(new PressEvent(keyCode), -1, delayBefore, 0);
-        for (int keyCode : keyCodes)
-            pendingEvents.emplace_back(new ReleaseEvent(keyCode), -1, CLICK_ACTION_DURATION_MS, delayAfter);
-        return "[OK]";
+            delayBefore = 0; // Only delay before the first key
+        }
+        delayBefore = CLICK_ACTION_DURATION_MS;
+        for (size_t i = 0; i < keyCodes.size(); ++i) {
+            int delay = (i == keyCodes.size() - 1) ? delayAfter : CLICK_ACTION_DURATION_MS;
+            pendingEvents.emplace_back(new ReleaseEvent(keyCodes[i]), -1, delayBefore, delay);
+            delayBefore = 0; // Only delay before the first key
+        }
+        if (block) {
+            // Response after injecting
+            pendingEvents.emplace_back(new RepeatEvent(-clientFd - 1), -1, 0, 0);
+        }
+        return ""; // Suppress instant response
     }
     // Single key action
     int keyCode;
@@ -943,6 +975,11 @@ std::string HotkeyManager::commandInject(int clientFd, const std::string& args) 
         syslog(LOG_NOTICE, "Invalid key in Inject command from clientFd=%d: %s", clientFd, e.what());
         return std::string("[Error]: Invalid key: ") + e.what();
     }
+    if (block) {
+        // Response after injecting
+        pendingEvents.emplace_back(new RepeatEvent(-clientFd - 1), -1, 0, 0);
+    }
+    pendingEvents.emplace_back(new RepeatEvent(KEY_RESERVED), -1, 0, 0); // update lastPendingEventTime
     if (actionStr == "press") {
         pendingEvents.emplace_back(new PressEvent(keyCode), -1, delayBefore, delayAfter);
     } else if (actionStr == "release") {
@@ -953,7 +990,11 @@ std::string HotkeyManager::commandInject(int clientFd, const std::string& args) 
         syslog(LOG_NOTICE, "Invalid action in Inject command from clientFd=%d: %s", clientFd, actionStr.c_str());
         return "[Error]: Invalid action, must be one of press, release, repeat, or click";
     }
-    return "[OK]";
+    if (!block) {
+        // Response before injecting
+        pendingEvents.emplace_back(new RepeatEvent(-clientFd - 1), -1, 0, 0); // Dummy event to trigger response sending
+    }
+    return ""; // Suppress instant response
 }
 
 } // namespace hotkey_manager

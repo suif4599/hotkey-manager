@@ -40,7 +40,7 @@ public:
     void deleteCallback(std::string functionId);
     void authenticate(const std::string& password);
     std::string formatHotkey(const std::string& hotkeyStr);
-    void inject(const std::string& key, const std::string& action = "", int beforeMs = 0, int afterMs = 0);
+    void inject(const std::string& key, const std::string& action = "", int beforeMs = 0, int afterMs = 0, bool block = true);
     void mainloop(std::function<bool()> keepRunning = []() {
         return true;
     });

@@ -59,6 +59,12 @@ int main() {
             std::cout << "  " << hotkey << " -> " << callbacks.size() << " callback(s)" << std::endl;
         }
 
+        // Demonstrate inject in blocking and non-blocking modes
+        hotkeyInterface.inject("K+ENTER");
+        std::cout << "[demo] Blocking inject completed." << std::endl;
+        hotkeyInterface.inject("TAB", "press", 0, 0, false);
+        std::cout << "[demo] Non-blocking inject submitted." << std::endl;
+
         // The exit callback toggles a flag that the mainloop watchdog reads
         std::atomic<bool> keepRunning {true};
         hotkeyInterface.registerHotkey(
@@ -78,7 +84,7 @@ int main() {
                 return false;
             }
             if (std::chrono::steady_clock::now() - startTime >= maxDemoDuration) {
-                std::cout << "[demo] Auto-stopping mainloop after 30 seconds." << std::endl;
+                std::cout << "[demo] Auto-stopping mainloop after 60 seconds." << std::endl;
                 return false;
             }
             return true;

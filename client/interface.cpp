@@ -223,8 +223,8 @@ std::string HotkeyInterface::formatHotkey(const std::string& hotkeyStr) {
     throw std::runtime_error("Failed to format hotkey: " + decryptedResp);
 }
 
-void HotkeyInterface::inject(const std::string& key, const std::string& action, int beforeMs, int afterMs) {
-    std::string command = "Inject(" + (action.empty() ? "" : action + ":") + key + ", " + std::to_string(beforeMs) + ", " + std::to_string(afterMs) + ")";
+void HotkeyInterface::inject(const std::string& key, const std::string& action, int beforeMs, int afterMs, bool block) {
+    std::string command = (block ? "Inject(/" : "Inject(") + (action.empty() ? "" : action + ":") + key + ", " + std::to_string(beforeMs) + ", " + std::to_string(afterMs) + ")";
     std::string decryptedResp;
     {
         std::lock_guard<std::mutex> ioLock(ioMutex);

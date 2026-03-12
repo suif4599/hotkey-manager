@@ -141,7 +141,7 @@ When the last callback for a hotkey disappears the daemon mapping is cleared.
 Requests canonical formatting from the daemon without registering the hotkey.
 Useful for validating user input or persisting normalized strings.
 .TP
-.BI "void inject(const std::string& " key ", const std::string& " action " = \"\", int " beforeMs " = 0, int " afterMs " = 0)"
+.BI "void inject(const std::string& " key ", const std::string& " action " = \"\", int " beforeMs " = 0, int " afterMs " = 0, bool " block " = true)"
 Requests synthetic keyboard input through the daemon.  When
 .I action
 is empty, the daemon performs a full press/release sequence for
@@ -156,6 +156,9 @@ adds a delay before the injection operation begins and
 .I afterMs
 adds a delay after the injection operation completes.  Combined keys are intended for the
 default press/release path.
+.I block
+controls return timing: true waits until injection completes, false returns
+immediately after the request is submitted.
 .TP
 .BI "void mainloop(std::function<bool()> " keepRunning " = []{ return true; })"
 Runs the event loop, delivering callbacks and issuing
@@ -222,7 +225,7 @@ int main() {
         std::puts("ESC pressed twice");
     });
 
-    iface.inject("ENTER", "", 20, 20);
+    iface.inject("ENTER");
 
     iface.mainloop();
 }

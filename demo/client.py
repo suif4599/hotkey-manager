@@ -23,7 +23,7 @@ def main() -> None:
     manager = HotkeyManagerInterface()
     print("Connected to hotkey-manager daemon.")
 
-    manager.authenticate("pass")
+    manager.authenticate(input("Enter authentication password: "))
     print("Authentication succeeded.")
 
     # Register the primary hotkey that will stay active for the entire demo
@@ -48,6 +48,14 @@ def main() -> None:
     manager.register_hotkey("LEFTALT + B", on_removable)
     manager.delete_callback(on_removable)
     print("Registered and removed callback via delete_callback.")
+
+    # Demonstrate inject in blocking and non-blocking modes
+    start = time.perf_counter()
+    manager.inject("K+ENTER", block=True)
+    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    print(f"[demo] Blocking inject completed in {elapsed_ms:.2f} ms.")
+    manager.inject("TAB", block=False)
+    print("[demo] Non-blocking inject submitted.")
 
     # The exit callback terminates the mainloop by raising KeyboardInterrupt with SIGINT
     def on_exit() -> None:

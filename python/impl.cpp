@@ -424,12 +424,14 @@ extern "C" PyObject* inject(HotkeyManagerInterfaceObject* self, PyObject* args, 
     PyObject* actionObj = nullptr;
     PyObject* beforeMsObj = nullptr;
     PyObject* afterMsObj = nullptr;
+    PyObject* blockObj = nullptr;
     static char kw_key[] = "key";
     static char kw_action[] = "action";
     static char kw_before_ms[] = "before_ms";
     static char kw_after_ms[] = "after_ms";
-    static char* kwlist[] = {kw_key, kw_action, kw_before_ms, kw_after_ms, nullptr};
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|OOO", kwlist, &keyObj, &actionObj, &beforeMsObj, &afterMsObj))
+    static char kw_block[] = "block";
+    static char* kwlist[] = {kw_key, kw_action, kw_before_ms, kw_after_ms, kw_block, nullptr};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|OOOO", kwlist, &keyObj, &actionObj, &beforeMsObj, &afterMsObj, &blockObj))
         return nullptr;
 
     if (!PyUnicode_Check(keyObj)) {
@@ -476,12 +478,18 @@ extern "C" PyObject* inject(HotkeyManagerInterfaceObject* self, PyObject* args, 
             return nullptr;
     }
 
+    if (blockObj != nullptr && !PyBool_Check(blockObj)) {
+        PyErr_SetString(PyExc_TypeError, "block must be a boolean");
+        return nullptr;
+    }
+    bool block = (blockObj == nullptr || blockObj == Py_True);
+
     // Do Cpp call
     PyThreadState* threadState = PyEval_SaveThread();
     std::string errorMessage;
     bool failed = false;
     try {
-        self->hotkeyInterface->inject(keyUtf8, actionStr, beforeMs, afterMs);
+        self->hotkeyInterface->inject(keyUtf8, actionStr, beforeMs, afterMs, block);
     } catch (const std::exception& e) {
         failed = true;
         errorMessage = e.what();
@@ -681,7 +689,7 @@ const char* HotkeyManagerInterface_delete_callback_docstring = \
     "RuntimeError\n"\
     "    Raised when the callback is unknown for this session.";
 const char* HotkeyManagerInterface_inject_docstring = \
-    "inject($self, key: str, action: Optional[str] = None, before_ms: int = 0, after_ms: int = 0)\n"\
+    "inject($self, key: str, action: Optional[Literal['press', 'release', 'repeat']] = None, before_ms: int = 0, after_ms: int = 0, block: bool = True)\n"\
     "--\n"\
     "\n"\
     "Simulate key events by injecting them into the OS input stream via the daemon.\n"\
@@ -695,12 +703,15 @@ const char* HotkeyManagerInterface_inject_docstring = \
     "----------\n"\
     "key: str\n"\
     "    Key expression to inject (e.g. 'LEFTCTRL', 'LEFTALT + A'). Multiple keys are supported only if action is None.\n"\
-    "action: Optional[str]\n"\
-    "    If specified, must be 'press', 'release', or 'repeat' to indicate the type of event.\n"\
+    "action: Optional[Literal['press', 'release', 'repeat']]\n"\
+    "    Must be one of 'press', 'release', or 'repeat', or None for the default behavior.\n"\
     "before_ms: int, default 0\n"\
     "    Milliseconds to wait before starting the injection operation.\n"\
     "after_ms: int, default 0\n"\
     "    Milliseconds to wait after the injection operation completes.\n"\
+    "block: bool, default True\n"\
+    "    If True, wait for injection completion before returning.\n"\
+    "    If False, return immediately after submitting the request.\n"\
     "\n"\
     "Raises\n"\
     "------\n"\
